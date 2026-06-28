@@ -1,0 +1,9 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "dependencies": ["."],
+  "graphs": {
+    "compliance": "./src/agentic_compliance/graph.py:graph"
+  },
+  "env": "./.env",
+  "python_version": "3.12"
+}

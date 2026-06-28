@@ -1,0 +1,101 @@
+# Golden dataset STUB (committed starter examples).
+#
+#   data/golden_set_stub.yaml  = THIS FILE — a few starter examples, committed to the repo.
+#   data/golden_set.yaml       = the FROZEN, reviewed eval set generated at M6
+#                                (scripts/generate_golden.py), consumed by the eval at M7.
+#
+# Labels here are examples and must be human-reviewed before being treated as ground truth.
+# Do not evaluate against this stub — evaluate against the frozen golden_set.yaml.
+
+cases:
+  - id: secure_tls_001
+    repo_fixture: secure_terraform_app
+    control_id: SC-8
+    question: "Does the repo show encryption in transit for public traffic?"
+    expected_verdict: satisfied
+    expected_evidence_hints:
+      - "HTTPS listener"
+      - "TLS policy"
+    human_verified: false
+
+  - id: public_ssh_001
+    repo_fixture: insecure_terraform_app
+    control_id: AC-3
+    question: "Does the repo expose administrative access publicly?"
+    expected_verdict: gap
+    expected_evidence_hints:
+      - "0.0.0.0/0"
+      - "port 22"
+    human_verified: false
+
+  - id: wildcard_iam_001
+    repo_fixture: insecure_terraform_app
+    control_id: AC-6
+    question: "Does the repo enforce least-privilege IAM?"
+    expected_verdict: gap
+    expected_evidence_hints:
+      - "Action: *"
+      - "Resource: *"
+    human_verified: false
+
+  - id: secret_001
+    repo_fixture: hardcoded_secret_app
+    control_id: IA-5/SI
+    question: "Does the repo contain hardcoded secrets?"
+    expected_verdict: gap
+    expected_evidence_hints:
+      - "fake API key pattern"
+    human_verified: false
+
+  - id: no_iac_001
+    repo_fixture: no_iac_repo
+    control_id: SC-28
+    question: "Can encryption at rest be assessed from this repo?"
+    expected_verdict: not_assessable
+    expected_evidence_hints:
+      - "no storage IaC present"
+    human_verified: false
+
+  - id: ci_scan_001
+    repo_fixture: ci_scanning_repo
+    control_id: SI-2/RA-5
+    question: "Does CI include dependency or vulnerability scanning?"
+    expected_verdict: satisfied
+    expected_evidence_hints:
+      - "Trivy"
+      - "pip-audit"
+    human_verified: false
+
+  - id: encryption_rest_001
+    repo_fixture: secure_terraform_app
+    control_id: SC-28
+    question: "Is stored data encrypted at rest?"
+    expected_verdict: satisfied
+    expected_evidence_hints:
+      - "server_side_encryption_configuration"
+      - "sse_algorithm"
+    human_verified: false
+
+  - id: least_priv_001
+    repo_fixture: secure_terraform_app
+    control_id: AC-6
+    question: "Does IAM follow least privilege?"
+    expected_verdict: satisfied
+    expected_evidence_hints:
+      - "scoped Action"
+      - "specific Resource ARN"
+    human_verified: false
+
+  - id: audit_log_na_001
+    repo_fixture: no_iac_repo
+    control_id: AU-2/AU-12
+    question: "Is audit logging configured?"
+    expected_verdict: not_assessable
+    expected_evidence_hints:
+      - "no IaC or logging config present"
+    human_verified: false
+
+# NOTE: no `partial` example yet — `partial` needs a fixture where one part of a
+# control is satisfied and another is missing (e.g. encryption on one bucket but not
+# another). Add such a fixture and a case when you expand the frozen golden set, and
+# aim for >=3 examples per verdict class (see docs/EVAL_PLAN.md).

@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]   # >=77 for PEP 639 SPDX license expression
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-compliance-checker"
+version = "0.1.0"
+description = "Self-verifying agentic checker for code-detectable security controls"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+
+# VERSION POLICY: dependency specifiers below are minimum FLOORS (">="), not pins or
+# ceilings — `pip install` resolves the latest compatible release, so you are NOT held to
+# old versions. A floor is set only where a feature requires it (e.g. langchain>=1.3 for
+# PII streamed-output redaction). The one caveat is that "latest" is occasionally broken
+# (e.g. a langgraph 1.0.6 infinite-loop regression, and a langgraph/langgraph-prebuilt
+# version-mismatch in early 2026) — so verify against a known-good combo and pin exactly
+# only if you hit a regression. Don't blind-pin everything to old versions.
+# Core deps are intentionally light for M1 (safe loader, schemas). Install ".[agent]" at
+# M2+ for the MCP server and later graph/RAG/eval runtime; ".[studio]" at M5+ for LangGraph
+# Studio. (M2 builds a FastMCP server and `mcp` lives in `.[agent]`, so M2 needs that extra.)
+dependencies = [
+  "pydantic>=2.7",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.6",
+  "pre-commit>=3.0",
+]
+# Local dev server + LangGraph Studio (graph visualizer/debugger). Kept separate from
+# `dev` so CI's fast lane doesn't pull the server stack. Use: pip install -e ".[agent,studio]" && langgraph dev
+studio = [
+  "langgraph-cli[inmem]>=0.2",
+]
+agent = [
+  # Pins reflect known-good versions / gotchas (see docs/RESEARCH_NOTES if added):
+  #  - langchain >=1.3 for PII streamed-output redaction.
+  #  - verify langgraph is NOT the buggy 1.0.6 (infinite-loop regression) before pinning exact.
+  #  - langchain-mcp-adapters >=0.3 returns tool errors as ToolMessages (agent self-correct).
+  "langchain>=1.3",
+  "langchain-anthropic>=0.3",   # chat model (synthesis + verification)
+  "langchain-openai>=0.2",      # embeddings (text-embedding-3-small); swap for local if no key
+  "langgraph>=1.0",
+  "langchain-mcp-adapters>=0.3",
+  "mcp>=1.0",
+  "chromadb>=0.5",
+  "langchain-chroma>=0.1",
+  "scikit-learn>=1.5",
+  "ragas>=0.2",
+]
+
+[project.scripts]
+agentic-compliance = "agentic_compliance.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "agent: tests that require the LLM/agent stack (langchain, langgraph, MCP, model/network access). CI fast lane runs '-m \"not agent\"'.",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+# E/F: pycodestyle + pyflakes (defaults). I: import sorting. B: bugbear (real footguns).
+# UP: pyupgrade (modernize syntax — safe given the 3.12+ floor). SIM: simplify.
+select = ["E", "F", "I", "B", "UP", "SIM"]
+# The formatter owns line length (line-length above); E501 would only nag about long string
+# literals / comments / URLs the formatter intentionally won't wrap. Disable per Ruff guidance.
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"

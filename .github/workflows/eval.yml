@@ -1,0 +1,55 @@
+name: eval
+
+# The evaluation suite runs the REAL LLM graph (verdict accuracy + sampled RAGAS). It
+# costs tokens and is non-deterministic, so it does NOT run on every push/PR (that's the
+# fast lane in ci.yml), and — for a project that isn't changing daily — it is NOT
+# worth running nightly. Run it on demand: when you change the graph, prompts, or rubric,
+# and once to capture the numbers for the README.
+#
+# Requires ANTHROPIC_API_KEY (+ OPENAI_API_KEY only if you use OpenAI embeddings) as repo
+# secrets; it skips cleanly if absent.
+
+on:
+  workflow_dispatch:
+  # Optional: also run automatically only when core logic that can affect quality changes.
+  # Uncomment to enable.
+  # pull_request:
+  #   paths:
+  #     - "src/agentic_compliance/graph.py"
+  #     - "src/agentic_compliance/**/prompt*"
+  #     - "docs/RUBRIC.md"
+  #     - "data/golden_set.yaml"
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Gate on API key
+        id: gate
+        run: |
+          if [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No ANTHROPIC_API_KEY secret configured — skipping agent eval."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install (agent + dev)
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[agent,dev]"
+
+      - name: Agent tests + evaluation
+        if: steps.gate.outputs.run == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          pytest -m agent -q
+          python scripts/run_eval.py

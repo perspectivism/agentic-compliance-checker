@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug current pytest file",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["${file}", "-q"],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Debug CLI",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "agentic_compliance.cli",
+      "args": ["--help"],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}

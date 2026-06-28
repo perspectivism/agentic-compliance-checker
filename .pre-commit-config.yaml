@@ -1,0 +1,22 @@
+# Local pre-commit hooks that mirror CI: ruff (lint + format) and gitleaks (secret scan).
+# So you can't commit unformatted/unlinted code or a secret — the same bar CI enforces.
+#
+# Setup (once per clone, after pip install -e ".[dev]"):
+#   source .venv/bin/activate
+#   pre-commit install
+# Hooks then run on every `git commit`. Run on all files:  pre-commit run --all-files
+# Bump pinned hook versions to latest:                     pre-commit autoupdate
+#
+# gitleaks reads .gitleaks.toml, so the fixtures (intentional fake secrets) stay allowlisted.
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.20
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks

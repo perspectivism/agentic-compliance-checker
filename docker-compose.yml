@@ -1,0 +1,46 @@
+# Docker Compose for the agentic compliance checker.
+#
+# The image ENTRYPOINT is `python -m agentic_compliance.cli`, so the command you
+# pass after the service name is appended as CLI arguments. Common runs:
+#
+#   docker compose build
+#   docker compose run --rm app ingest-controls
+#   docker compose run --rm app assess --repo-url https://github.com/OWNER/REPO
+#   docker compose run --rm app eval
+#   docker compose run --rm test                 # fast suite (-m "not agent")
+#
+# There is intentionally no separate "mcp" service: the MCP server runs as a
+# stdio subprocess inside the app container (spawned by langchain-mcp-adapters).
+
+services:
+  app:
+    build: .
+    image: agentic-compliance-checker:latest
+    env_file: .env
+    volumes:
+      - ./chroma_db:/app/chroma_db      # persisted controls knowledge base
+      - ./artifacts:/app/artifacts      # eval reports + generated assessment reports
+
+  # Fast test service: deterministic tests only, no model/network access, no credentials.
+  test:
+    build: .
+    image: agentic-compliance-checker:latest
+    environment:
+      PYTEST_ADDOPTS: "-o cache_dir=/tmp/.pytest_cache"
+    entrypoint: ["pytest"]
+    command: ["-m", "not agent", "-q"]
+    volumes:
+      - .:/app
+
+  # Full test service: runs the entire suite including @pytest.mark.agent tests.
+  # Requires API keys in .env.
+  test-all:
+    build: .
+    image: agentic-compliance-checker:latest
+    env_file: .env
+    environment:
+      PYTEST_ADDOPTS: "-o cache_dir=/tmp/.pytest_cache"
+    entrypoint: ["pytest"]
+    command: ["-q"]
+    volumes:
+      - .:/app

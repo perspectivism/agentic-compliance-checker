@@ -1,0 +1,30 @@
+# Keep build context small and secrets out of the image.
+.git
+.gitignore
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+
+# Runtime state — never bake into the image (mounted as volumes instead).
+chroma_db/
+artifacts/
+
+# Secrets / local env
+.env
+*.env
+!.env.example
+
+# Private build tooling
+.ai/
+.agents/
+
+# Editor / OS noise
+.idea/
+.vscode/
+.DS_Store

@@ -1,0 +1,21 @@
+# Fixture: ci_scanning_repo
+# Intended positive evidence for SI-2/RA-5 (vulnerability / dependency scanning in CI).
+
+name: security
+
+on: [push, pull_request]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependency audit
+        run: pip-audit
+
+      - name: Filesystem vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          severity: HIGH,CRITICAL

@@ -1,0 +1,12 @@
+# Project-scoped Codex config, shared by the Codex CLI and the Codex IDE extension.
+# Loaded only when the project is trusted (Codex prompts on first use).
+#
+# Registers the LangChain documentation MCP server so Codex answers from current
+# LangChain / LangGraph / MCP docs rather than training data.
+#
+# No model is pinned here on purpose: Codex uses your account's recommended model, and a
+# committed pin would override everyone's choice and go stale. Set `model` in your own
+# ~/.codex/config.toml if you want to override it (e.g. model = "gpt-5.5").
+
+[mcp_servers.docs-langchain]
+url = "https://docs.langchain.com/mcp"

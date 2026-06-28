@@ -1,0 +1,10 @@
+agentic-compliance-checker
+Copyright 2026 Pero Matic
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+DISCLAIMER: This software is provided "AS IS", without warranty of any kind (see LICENSE,
+sections 7 and 8). It is NOT a compliance tool. It produces code-derived evidence mapped to
+a subset of NIST 800-53 Rev. 5 technical control IDs; it does not certify compliance against
+NIST 800-53, FedRAMP, SOC 2, HIPAA, CMMC, or ISO 27001, and does not assess procedural or
+organizational controls. Outputs are decision-support, not assurance. Use at your own risk.

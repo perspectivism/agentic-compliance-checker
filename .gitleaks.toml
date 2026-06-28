@@ -1,0 +1,13 @@
+# Dogfooding IA-5: scan this repo's own history/working tree for secrets in CI.
+# The fixture repos under tests/fixtures/ deliberately contain fake/example secrets
+# (e.g. AWS's documented non-functional example key) to exercise the secret scanner,
+# so they are allowlisted here to avoid self-flagging.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures contain intentional, non-functional example secrets"
+paths = [
+  '''tests/fixtures/.*''',
+]
