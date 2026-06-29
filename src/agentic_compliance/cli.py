@@ -41,9 +41,18 @@ def cmd_assess(args: argparse.Namespace) -> int:
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
-    # M3 wiring: load docs/RUBRIC.md + data/controls -> embed -> persist to ./chroma_db
-    #   from .kb import ingest_controls; ingest_controls()
-    return _not_implemented("ingest-controls", "M3")
+    from pathlib import Path  # noqa: PLC0415
+
+    from .kb import ingest_controls  # noqa: PLC0415
+
+    store_path = Path(args.store_path)
+    print(f"[agentic-compliance] Ingesting controls into {store_path} …", flush=True)
+    kwargs = {"store_path": store_path}
+    if args.controls_file:
+        kwargs["controls_path"] = Path(args.controls_file)
+    ingest_controls(**kwargs)
+    print(f"[agentic-compliance] Done — {store_path} is ready.", flush=True)
+    return 0
 
 
 def cmd_eval(args: argparse.Namespace) -> int:
@@ -72,6 +81,16 @@ def build_parser() -> argparse.ArgumentParser:
     a.set_defaults(func=cmd_assess)
 
     i = sub.add_parser("ingest-controls", help="Build the controls knowledge base (vector store).")
+    i.add_argument(
+        "--controls-file",
+        default=None,
+        help="Path to controls YAML (default: data/controls.yaml in the package root).",
+    )
+    i.add_argument(
+        "--store-path",
+        default="./chroma_db",
+        help="Directory to persist the Chroma vector store (default: ./chroma_db).",
+    )
     i.set_defaults(func=cmd_ingest)
 
     e = sub.add_parser("eval", help="Run the evaluation harness over the golden set.")

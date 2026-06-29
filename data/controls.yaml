@@ -1,0 +1,241 @@
+# Machine-readable control rubric for the agentic compliance checker.
+# Derived from docs/RUBRIC.md — keep both files in sync when editing controls.
+#
+# embed_text is purpose-built for semantic retrieval: it contains synonyms, common
+# query terms, and related concepts a user or agent would naturally use. It is NOT
+# a prose description — it is the text that gets embedded into the vector store.
+
+controls:
+
+  - id: SC-8
+    name: "Transmission confidentiality and integrity"
+    positive_evidence: "HTTPS listeners, TLS 1.2+, HTTP-to-HTTPS redirect, secure ingress config"
+    gap_evidence: "Plain HTTP listener exposed, weak TLS, no redirect"
+    notes: "IaC-focused"
+    scanner_hints:
+      - terraform
+      - kubernetes_yaml
+    evidence_hints:
+      - "Look for TLS/HTTPS configuration in load balancer, ingress, or security group resources"
+      - "Check for HTTP→HTTPS redirect rules"
+      - "Absence of port 80 listeners or presence of port 443 listeners"
+    embed_text: >
+      TLS HTTPS transmission confidentiality integrity encryption in-transit secure transport
+      protocol certificate listener HTTP redirect port 443 1.2 1.3 SSL load balancer ingress
+      secure channel network communication data in transit
+
+  - id: SC-28
+    name: "Protection of information at rest"
+    positive_evidence: "S3 SSE, RDS/EBS encryption, storage encryption enabled"
+    gap_evidence: "Encryption disabled or absent on storage resources"
+    notes: "Context-dependent"
+    scanner_hints:
+      - terraform
+    evidence_hints:
+      - "Look for server_side_encryption_configuration on S3 buckets"
+      - "Check storage_encrypted = true on RDS instances"
+      - "Check encrypted = true on EBS volumes"
+    embed_text: >
+      encryption at rest storage S3 bucket RDS EBS database volume server side encryption
+      SSE KMS key encrypted data at rest disk protection storage encryption AES-256
+      bucket encryption database encryption
+
+  - id: SC-12
+    name: "Cryptographic key management"
+    positive_evidence: "KMS key, key rotation, managed key references"
+    gap_evidence: "Hardcoded keys, disabled rotation"
+    notes: "Avoid claiming procedural key governance"
+    scanner_hints:
+      - terraform
+      - secrets
+    evidence_hints:
+      - "Look for aws_kms_key with enable_key_rotation = true"
+      - "Check for hardcoded key material in code or IaC"
+    embed_text: >
+      cryptographic key management KMS key rotation rotation enabled master key CMK
+      secrets manager parameter store key material hardcoded key symmetric asymmetric
+      HSM managed key lifecycle crypto
+
+  - id: IA-2
+    name: "MFA for privileged access"
+    positive_evidence: "MFA condition in IAM policy, SSO/MFA config"
+    gap_evidence: "Privileged policy lacks MFA condition"
+    notes: "Often partial/not-assessable"
+    scanner_hints:
+      - terraform
+    evidence_hints:
+      - "Look for aws:MultiFactorAuthPresent condition in IAM policies"
+      - "Check for MFA enforcement in SSO or identity provider config"
+    embed_text: >
+      MFA multi-factor authentication two-factor privileged access IAM policy condition
+      aws:MultiFactorAuthPresent SSO identity provider OTP TOTP FIDO MFA required
+      second factor authentication privileged user admin access
+
+  - id: AC-6
+    name: "Least privilege"
+    positive_evidence: "Scoped IAM actions/resources"
+    gap_evidence: "Action: *, Resource: *, broad admin policies"
+    notes: "Strong code-detectable signal"
+    scanner_hints:
+      - terraform
+    evidence_hints:
+      - "Check for wildcard Action: * or Resource: * in IAM policies"
+      - "Look for specific action lists instead of admin wildcards"
+      - "AdministratorAccess or FullAccess policies are high risk"
+    embed_text: >
+      least privilege IAM policy wildcard Action Resource asterisk * overly broad
+      admin access permissions minimal privilege need-to-know scope scoped policy
+      role permission IAM role over-privileged AdministratorAccess FullAccess
+
+  - id: AC-3
+    name: "Access enforcement and public exposure"
+    positive_evidence: "S3 public access block, scoped security groups"
+    gap_evidence: "Public buckets, 0.0.0.0/0 to admin ports"
+    notes: "High-confidence IaC evidence"
+    scanner_hints:
+      - terraform
+      - kubernetes_yaml
+    evidence_hints:
+      - "Look for block_public_acls = true on S3 buckets"
+      - "Check security groups for 0.0.0.0/0 ingress rules on sensitive ports"
+      - "Check S3 bucket ACL for public-read or public-read-write"
+    embed_text: >
+      public access exposure S3 bucket ACL public-read security group ingress 0.0.0.0/0
+      open internet access public IP CIDR all traffic block public access
+      access enforcement unauthorized access network exposure open port
+
+  - id: SC-7
+    name: "Boundary protection"
+    positive_evidence: "Private subnets, security group references, segmented tiers"
+    gap_evidence: "Flat network, public database, permissive ingress"
+    notes: "Partial if only some tiers protected"
+    scanner_hints:
+      - terraform
+      - kubernetes_yaml
+    evidence_hints:
+      - "Check that databases are in private subnets"
+      - "Look for VPC segmentation across tiers (web, app, db)"
+      - "Security group references instead of IP ranges indicate internal-only access"
+    embed_text: >
+      boundary protection network segmentation VPC subnet private subnet firewall
+      perimeter security group tiered architecture DMZ web tier database tier
+      network boundary isolation internal only access control network topology
+
+  - id: AU-2/AU-12
+    name: "Audit logging"
+    positive_evidence: "CloudTrail, ALB/S3 access logs, app audit logger"
+    gap_evidence: "Logging disabled or absent"
+    notes: "Code/IaC only"
+    scanner_hints:
+      - terraform
+      - logging_monitoring
+    evidence_hints:
+      - "Look for aws_cloudtrail resources with is_logging = true"
+      - "Check S3 buckets for logging { target_bucket = ... }"
+      - "Look for ALB/ELB access log configuration"
+    embed_text: >
+      audit logging CloudTrail access log ALB ELB S3 logging event log record
+      auditability audit trail log enabled is_logging CloudWatch log group
+      application logging structured log monitoring log retention
+
+  - id: AU-9
+    name: "Audit log protection"
+    positive_evidence: "Immutable/versioned log bucket, validation enabled"
+    gap_evidence: "Mutable log store, no validation"
+    notes: "Often partial"
+    scanner_hints:
+      - terraform
+    evidence_hints:
+      - "Check if CloudTrail log file validation is enabled"
+      - "Look for versioning on the S3 log bucket"
+      - "Check for object lock or MFA delete on log bucket"
+    embed_text: >
+      audit log protection immutable log versioning S3 versioning object lock MFA delete
+      log integrity validation CloudTrail log file validation tamper proof log
+      log retention write-once log protection log bucket
+
+  - id: SI-2/RA-5
+    name: "Vulnerability scanning"
+    positive_evidence: "Trivy/Snyk/pip-audit/Dependabot in CI"
+    gap_evidence: "No dependency scanning config"
+    notes: "CI evidence"
+    scanner_hints:
+      - ci
+    evidence_hints:
+      - "Look for pip-audit, npm audit, or Dependabot config in CI workflows"
+      - "Check for Trivy, Snyk, or Grype in CI steps"
+      - "Check for dependabot.yml or renovate.json"
+    embed_text: >
+      vulnerability scanning dependency scanning Trivy Snyk Grype pip-audit npm audit
+      Dependabot renovate CVE patch vulnerability management software composition analysis
+      SCA DAST SAST security scanning CI pipeline supply chain known vulnerability
+
+  - id: IA-5/SI
+    name: "Secrets handling"
+    positive_evidence: "Env vars, secrets manager, OIDC, no committed secrets"
+    gap_evidence: "Hardcoded API keys/passwords/tokens"
+    notes: "Scanner-backed"
+    scanner_hints:
+      - secrets
+      - ci
+    evidence_hints:
+      - "Scan for hardcoded credentials: AWS keys, passwords, API tokens"
+      - "Check for secrets manager or parameter store references"
+      - "Look for OIDC-based authentication in CI instead of static keys"
+    embed_text: >
+      secrets handling credentials hardcoded API key password token secret committed
+      secret scanner gitleaks detect-secrets AWS access key password assignment
+      credential management secrets manager parameter store OIDC no plaintext secret
+      environment variable secret injection
+
+  - id: CM-2/CM-6
+    name: "Container baseline hardening"
+    positive_evidence: "Non-root USER, pinned base, minimal image"
+    gap_evidence: "Root user, latest tag, privileged container"
+    notes: "Docker/K8s evidence"
+    scanner_hints:
+      - dockerfile
+      - kubernetes_yaml
+    evidence_hints:
+      - "Check Dockerfile USER directive — must not be root or UID 0"
+      - "Check base image tag — must not be :latest"
+      - "Check for privileged: true in K8s manifests"
+      - "Look for resource limits and security context in K8s pods"
+    embed_text: >
+      container hardening Docker Dockerfile USER root non-root unpinned latest base image
+      Kubernetes pod security context privileged resource limits securityContext
+      container baseline minimal image distroless pinned digest CM-6 CM-2
+      running as root UID 0 container security
+
+  - id: CM-3
+    name: "Change control"
+    positive_evidence: "CODEOWNERS, branch protection config, required reviews in CI metadata"
+    gap_evidence: "No review/change gate evidence"
+    notes: "May be not-assessable from repo alone"
+    scanner_hints:
+      - ci
+    evidence_hints:
+      - "Look for CODEOWNERS file in repo root or .github/"
+      - "Check for branch protection rules in CI config"
+      - "Look for required PR review counts in GitHub Actions or CI metadata"
+    embed_text: >
+      change control CODEOWNERS branch protection required review pull request approval
+      code review change management CI gate CODEOWNERS file merge protection
+      change approval workflow peer review required approvers
+
+  - id: SI-4/AU
+    name: "Monitoring and alerting"
+    positive_evidence: "CloudWatch alarms, GuardDuty, alert rules, app metrics"
+    gap_evidence: "No monitoring resources"
+    notes: "Context-dependent"
+    scanner_hints:
+      - terraform
+      - logging_monitoring
+    evidence_hints:
+      - "Look for aws_cloudwatch_metric_alarm resources"
+      - "Check for aws_guardduty_detector with enable = true"
+      - "Look for Prometheus alert rules or similar monitoring config"
+    embed_text: >
+      monitoring alerting CloudWatch alarm GuardDuty metrics alert rule Prometheus
+      threat detection anomaly detection security monitoring intrusion detection
+      SIEM observability alert notification uptime monitoring metric threshold

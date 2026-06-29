@@ -75,7 +75,7 @@ cp .env.example .env        # set CHAT_MODEL + the matching provider key (embedd
 
 make build                  # build the image
 make test                   # fast test suite (-m "not agent")
-make ingest                 # build the controls knowledge base  [M3+]
+make ingest                 # build the controls knowledge base
 make assess REPO=https://github.com/OWNER/REPO  # assess a public repo  [M5+]
 make eval                   # run the evaluation harness  [M7+]
 ```

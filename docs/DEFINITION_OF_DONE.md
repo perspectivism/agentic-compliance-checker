@@ -4,11 +4,11 @@ The project is done when all items below are true.
 
 ## Core implementation
 
-- [ ] Safe repo loader implemented.
-- [ ] MCP server implemented.
-- [ ] MCP tools return structured outputs.
-- [ ] Controls KB exists.
-- [ ] Retriever supports exact and semantic lookup.
+- [x] Safe repo loader implemented.
+- [x] MCP server implemented.
+- [x] MCP tools return structured outputs.
+- [x] Controls KB exists.
+- [x] Retriever supports exact and semantic lookup.
 - [ ] LangGraph `StateGraph` implemented.
 - [ ] Typed graph state implemented.
 - [ ] Synthesizer produces structured verdicts.
@@ -18,9 +18,9 @@ The project is done when all items below are true.
 
 ## Tests
 
-- [ ] M1 tests pass.
-- [ ] M2 tests pass.
-- [ ] M3 tests pass.
+- [x] M1 tests pass.
+- [x] M2 tests pass.
+- [x] M3 tests pass.
 - [ ] M4 tests pass.
 - [ ] M5 tests pass.
 - [ ] M6 tests pass.

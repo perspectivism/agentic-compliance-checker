@@ -50,6 +50,8 @@ agent = [
   "mcp>=1.0",
   "chromadb>=0.5",
   "langchain-chroma>=0.1",
+  "langchain-huggingface>=0.1",   # local embeddings (all-MiniLM-L6-v2, no API key)
+  "sentence-transformers>=3.0",   # model backend for langchain-huggingface
   "scikit-learn>=1.5",
   "ragas>=0.2",
 ]

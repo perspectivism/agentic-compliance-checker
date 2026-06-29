@@ -15,7 +15,7 @@ help:
 	@echo "    make build               Build the image"
 	@echo "    make test                Fast test suite  (pytest -m 'not agent')"
 	@echo "    make test-all            Full test suite  (requires API keys in .env)"
-	@echo "    make ingest              Build the controls knowledge base   [M3+]"
+	@echo "    make ingest              Build the controls knowledge base"
 	@echo "    make assess REPO=<url>   Assess a public GitHub repo         [M5+]"
 	@echo "    make eval                Run the evaluation harness          [M7+]"
 	@echo "    make shell               Open a bash shell in the container"
