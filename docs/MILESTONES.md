@@ -100,20 +100,25 @@ Pass condition:
 
 ---
 
-## M4 — Evidence agent / node
+## M4 — Evidence collector node
 
 ### Build
 - Evidence collector node.
-- Calls MCP tools based on selected control.
-- Normalizes findings into `EvidenceRef`.
+- Selects read-only MCP tools from the current control context / `scanner_hints`.
+- Calls only deterministic MCP tools; no LLM and no direct filesystem access.
+- Normalizes `ToolFinding` and file excerpts into `EvidenceRef` records.
+- Records collection limitations/errors separately from evidence.
 - Does not draft final verdicts yet.
 
 ### Unit tests
-- SC-8 fixture collects HTTPS evidence.
+- SC-8 fixture collects plain-HTTP/TLS-gap evidence (`plain_http_listener` finding).
 - AC-6 fixture collects wildcard IAM evidence.
-- Secret fixture collects hardcoded secret evidence.
-- No evidence produces empty evidence with clear reason.
-- **A tool/scanner error or timeout yields `not_assessable` with an error note — not a crash, not `satisfied` (fail-closed).**
+- Secret fixture collects hardcoded secret evidence with redacted excerpt.
+- No relevant evidence returns empty evidence plus a clear limitation/reason.
+- Tool/scanner error or timeout records a fail-closed collection error for the control — no crash, no `satisfied`, and enough information for M5 to emit `not_assessable`.
+- Collector uses control scanner hints to avoid irrelevant tools.
+- `ToolFinding` fields normalize into `EvidenceRef` with repo-relative path, line range, excerpt, and `source_type: "tool_result"`.
+- File excerpts from `read_file_slice` normalize into `EvidenceRef` with `source_type: "repo_file"`.
 
 ### Acceptance gate
 ```bash

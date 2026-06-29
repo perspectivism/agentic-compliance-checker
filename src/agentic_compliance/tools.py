@@ -211,6 +211,27 @@ def _scan_terraform(repo_root: Path, files: list[RepoFile]) -> list[ToolFinding]
                     )
                 )
 
+        # Plain HTTP listener: load balancer listener with no TLS termination
+        for i, line in enumerate(lines, start=1):
+            if re.match(r'\s*protocol\s*=\s*"HTTP"', line, re.IGNORECASE):
+                findings.append(
+                    ToolFinding(
+                        path=rel,
+                        start_line=i,
+                        end_line=i,
+                        finding_type="plain_http_listener",
+                        check_family="terraform",
+                        severity="high",
+                        message="Load balancer listener uses plain HTTP — no TLS termination",
+                        control_hints=["SC-8"],
+                        excerpt=line.strip(),
+                        redacted=False,
+                        limitations=[
+                            "Cannot determine if an HTTP→HTTPS redirect rule is configured elsewhere"
+                        ],
+                    )
+                )
+
         # Wildcard IAM: Action="*" and Resource="*" in the same file
         _action_re = re.compile(r'(?i)(?:Action\s*=|"Action"\s*:)\s*"\*"')
         _resource_re = re.compile(r'(?i)(?:Resource\s*=|"Resource"\s*:)\s*"\*"')

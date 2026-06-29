@@ -21,7 +21,7 @@ The project is done when all items below are true.
 - [x] M1 tests pass.
 - [x] M2 tests pass.
 - [x] M3 tests pass.
-- [ ] M4 tests pass.
+- [x] M4 tests pass.
 - [ ] M5 tests pass.
 - [ ] M6 tests pass.
 - [ ] M7 tests pass.

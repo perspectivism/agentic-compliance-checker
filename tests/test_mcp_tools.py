@@ -311,6 +311,22 @@ class TestScanIACSecurity:
         findings = scan_iac_security(tmp_path)
         assert any(f.finding_type == "k8s_missing_security_context" for f in findings)
 
+    def test_terraform_flags_plain_http_listener(self, tmp_path):
+        """scan_iac_security flags protocol = "HTTP" in a load balancer listener."""
+        (tmp_path / "main.tf").write_text(
+            'resource "aws_lb_listener" "http" {\n  port     = 80\n  protocol = "HTTP"\n}\n'
+        )
+        findings = scan_iac_security(tmp_path)
+        assert any(f.finding_type == "plain_http_listener" for f in findings)
+
+    def test_terraform_plain_http_listener_has_sc8_control_hint(self, tmp_path):
+        """plain_http_listener finding is mapped to SC-8."""
+        (tmp_path / "main.tf").write_text('  protocol = "HTTP"\n')
+        findings = scan_iac_security(tmp_path)
+        for f in findings:
+            if f.finding_type == "plain_http_listener":
+                assert "SC-8" in f.control_hints
+
     def test_dockerfile_flags_numeric_uid_zero(self, tmp_path):
         """scan_iac_security flags USER 0 (numeric root UID)."""
         (tmp_path / "Dockerfile").write_text("FROM python:3.12-slim\nUSER 0\n")
