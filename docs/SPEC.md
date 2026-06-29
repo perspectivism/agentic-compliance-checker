@@ -239,7 +239,7 @@ and secret-scanning hooks. Also flags workflows with overly broad permissions or
 7. All tools return structured data, not arbitrary raw dumps.
 8. Step budget and recursion limit are mandatory.
 9. **Fail closed.** On any tool error, timeout, or unparseable output, the affected control is `not_assessable` with an error note — never `satisfied`, and never an unhandled exception.
-10. **Validate the repo URL before cloning.** Allow only `https` to permitted forge hosts; reject `file://`, `ext::`, `ssh://`, `git://`, and internal/private/loopback addresses.
+10. **Validate the repo URL before cloning.** Allow only `https` to permitted forge hosts; reject `file://`, `ext::`, `ssh://`, `git://`, scp-like `git@` syntax, and internal/private/loopback addresses.
 11. **Egress allowlist.** The only outbound network calls are the clone and the model/embeddings API; analysis tools perform no network I/O.
 
 ## Held open until the first real run (resolve at M7)

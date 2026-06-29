@@ -27,7 +27,7 @@ in each acceptance gate below.
 - Skips `node_modules`.
 - Skips binary file.
 - Rejects symlink escaping repo root (create the symlink in-test; see TEST_PLAN).
-- **Rejects `file://`, `ext::`, `ssh://`, `git://`, and internal/private/loopback URLs before cloning.**
+- **Rejects `file://`, `ext::`, `ssh://`, `git://`, scp-like `git@` syntax, and internal/private/loopback URLs before cloning.**
 - Caps large files.
 - Reads valid Terraform/YAML/Dockerfile/Python/Markdown files.
 - Does not execute anything (and never runs install/build/hooks on clone).
