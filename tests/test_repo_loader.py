@@ -1,4 +1,4 @@
-"""M1: safe repository loader — URL validation, file filtering, and line reader."""
+"""Safe repository loader — URL validation, file filtering, and line reader."""
 
 import os
 from pathlib import Path
@@ -239,6 +239,18 @@ class TestResolveRepoInput:
         """A valid local path string is returned as a Path without cloning."""
         result = resolve_repo_input(str(FIXTURES / "secure_terraform_app"))
         assert result.is_dir()
+
+    def test_local_path_is_always_absolute(self):
+        """resolve_repo_input returns an absolute path even for a relative input."""
+        import os  # noqa: PLC0415
+
+        original = os.getcwd()
+        try:
+            os.chdir(FIXTURES)
+            result = resolve_repo_input("secure_terraform_app")
+            assert result.is_absolute()
+        finally:
+            os.chdir(original)
 
     def test_rejects_nonexistent_local_path(self, tmp_path):
         """A nonexistent local path raises RepoPathError."""

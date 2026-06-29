@@ -5,6 +5,7 @@ targets specific controls/behaviors. They are **not** real projects.
 
 | Fixture | Exercises | Expected signal |
 |---|---|---|
+| `ci_no_security_repo` | SI-2/RA-5 CI scanning (gap) | CI present but no security scanner → `gap` |
 | `ci_scanning_repo` | SI-2/RA-5 CI scanning | Trivy/pip-audit present → `satisfied` |
 | `hardcoded_secret_app` | IA-5/SI secrets handling | secret detected → `gap`; value MASKED in logs/report |
 | `insecure_terraform_app` | AC-3, AC-6, SC-28, SC-8 | negative evidence → `gap` |

@@ -27,7 +27,7 @@ def _not_implemented(feature: str, milestone: str) -> int:
 
 def cmd_assess(args: argparse.Namespace) -> int:
     # M5 wiring:
-    #   from .repo_loader import resolve_repo_input  # safe clone (URL) or local path (M1)
+    #   from .repo_loader import resolve_repo_input  # safe clone (URL) or local path
     #   from .graph import run_assessment            # supervisor + verifier loop (M5)
     #   path = resolve_repo_input(args.repo_url or args.repo_path)
     #   report = run_assessment(path, controls=args.controls)

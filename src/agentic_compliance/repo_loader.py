@@ -240,7 +240,10 @@ def resolve_repo_input(
     (a temp directory if clone_base is None — caller is responsible for cleanup).
 
     Otherwise source is treated as a local path: validate_repo_path is called
-    and the Path is returned directly.
+    and the resolved absolute Path is returned.
+
+    Always returns an absolute path — safe_clone targets are absolute (tempfile),
+    and local paths are resolved so tool functions can compare paths unambiguously.
 
     Raises RepoURLError or RepoPathError on invalid input;
     subprocess.CalledProcessError on clone failure.
@@ -252,7 +255,7 @@ def resolve_repo_input(
         return safe_clone(source, clone_base / slug, timeout=clone_timeout)
     path = Path(source)
     validate_repo_path(path)
-    return path
+    return path.resolve()  # always absolute; prevents relative-vs-absolute mismatch in tools
 
 
 # ── File iteration ─────────────────────────────────────────────────────────────

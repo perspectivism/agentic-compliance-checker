@@ -79,6 +79,9 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 # literals / comments / URLs the formatter intentionally won't wrap. Disable per Ruff guidance.
 ignore = ["E501"]
 
+[tool.ruff.lint.isort]
+combine-as-imports = true
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
