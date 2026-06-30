@@ -1,4 +1,4 @@
-"""Shared output schemas for MCP tool results and evidence normalization.
+"""Shared output schemas for MCP tool results, evidence normalization, and graph verdicts.
 
 ToolFinding is returned by scanner tools (scan_secrets, scan_iac_security,
 scan_ci_security). The Evidence Collector normalizes these into EvidenceRef
@@ -6,11 +6,14 @@ entries before the Synthesizer reasons over them.
 
 RepoFileListing is returned by the list_repo_files tool.
 EvidenceRef and CollectionResult are produced by the Evidence Collector.
+VerdictClass, SynthesizerOutput, VerifierDecision, ControlVerdict, and FinalReport
+are produced by the LangGraph supervisor and verifier loop (graph.py).
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from enum import StrEnum
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -79,5 +82,63 @@ class CollectionResult(BaseModel):
 
     control_id: str
     evidence: list[EvidenceRef]
-    errors: list[str]  # tool/scanner failures; non-empty signals not_assessable to M5
+    errors: list[str]  # tool/scanner failures; non-empty signals not_assessable to Synthesizer
     limitations: list[str]  # "no relevant files", "heuristic only", etc.
+
+
+# ── Graph verdict schemas ──────────────────────────────────────────────────────
+
+
+class VerdictClass(StrEnum):
+    """The four possible outcomes for a control assessment."""
+
+    satisfied = "satisfied"
+    partial = "partial"
+    gap = "gap"
+    not_assessable = "not_assessable"
+
+
+class SynthesizerOutput(BaseModel):
+    """Verdict and reasoning produced by the Synthesizer LLM node.
+
+    Evidence is NOT included here — it is taken directly from CollectionResult
+    so it can never be hallucinated by the LLM.
+    """
+
+    verdict: VerdictClass
+    rationale: str  # must reference only the provided scanner evidence
+    confidence: float = 0.0  # 0.0–1.0; LLM self-report, not calibrated
+
+
+class VerifierDecision(BaseModel):
+    """Approve/reject decision produced by the Verifier LLM node."""
+
+    approved: bool
+    notes: str  # rejection rationale (for retry prompt) or approval confirmation
+
+
+class ControlVerdict(BaseModel):
+    """Complete verdict for one control, combining LLM reasoning and scanner evidence.
+
+    evidence is always sourced from the Evidence Collector, never invented by the LLM.
+    Any non-not_assessable verdict MUST have non-empty evidence and no collection errors.
+    The deterministic fail-closed guard in finalize_control_node enforces this in code,
+    not just in the prompt.
+    """
+
+    control_id: str
+    verdict: VerdictClass
+    evidence: list[EvidenceRef]  # from the scanner, never LLM-invented
+    rationale: str
+    confidence: float = 0.0
+    verifier_status: Literal["passed", "failed", "not_run"] = "not_run"
+    verifier_notes: str = ""
+    attempt: int = 1  # which synthesis attempt produced this verdict
+
+
+class FinalReport(BaseModel):
+    """Complete assessment report for one repository run."""
+
+    repo_path: str
+    verdicts: list[ControlVerdict]
+    audit: dict[str, Any]  # run_id, started_at, model_id, verdict counts

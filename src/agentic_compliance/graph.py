@@ -1,0 +1,421 @@
+"""LangGraph StateGraph: supervisor → collect → synthesize → verify loop → final report.
+
+Topology:
+    START → supervisor → collect → synthesize → verify ─┬─(approved / exhausted)→ finalize_control → supervisor
+                                                         └─(rejected, retries remain)→ synthesize
+    supervisor → final → END  (when all controls are done)
+
+Fail-closed invariants:
+- Any affirmative (non-not_assessable) verdict requires non-empty scanner evidence
+  and no tool errors — enforced deterministically in finalize_control_node, not just
+  via prompt instruction.
+- If the verifier rejects MAX_VERIFIER_ATTEMPTS times, the verdict is downgraded to
+  'not_assessable' with verifier failure notes — the loop cannot run forever.
+- GRAPH_RECURSION_LIMIT provides a hard LangGraph-level backstop.
+"""
+
+from __future__ import annotations
+
+import operator
+import os
+import uuid
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Annotated, Any, TypedDict, cast
+
+from langchain.chat_models import init_chat_model
+from langgraph.graph import END, START, StateGraph
+
+from .evidence_collector import collect_evidence
+from .kb import ControlEntry, load_controls
+from .schemas import (
+    CollectionResult,
+    ControlVerdict,
+    FinalReport,
+    SynthesizerOutput,
+    VerdictClass,
+    VerifierDecision,
+)
+
+
+def _parse_max_verifier_attempts() -> int:
+    """Read MAX_VERIFIER_ATTEMPTS from env, validating it is a positive integer."""
+    raw = os.environ.get("MAX_VERIFIER_ATTEMPTS", "3")
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f"MAX_VERIFIER_ATTEMPTS must be a positive integer, got {raw!r}") from None
+    if value < 1:
+        raise ValueError(f"MAX_VERIFIER_ATTEMPTS must be >= 1, got {value}")
+    return value
+
+
+# Verifier attempts cap per control. After this many rejections the verdict is
+# force-downgraded to not_assessable so the loop cannot run forever.
+# Configurable via MAX_VERIFIER_ATTEMPTS env var (positive integer); defaults to 3.
+MAX_VERIFIER_ATTEMPTS: int = _parse_max_verifier_attempts()
+
+# Hard backstop: total node invocations for the whole run.
+# Worst case per control: 1 supervisor + 1 collect + MAX*synthesize + MAX*verify + 1 finalize = 9
+# With 14 controls: 14*9 + 1 supervisor(initial) + 1 final = 128. 200 gives comfortable headroom.
+GRAPH_RECURSION_LIMIT: int = 200
+
+_SYNTHESIZER_SYSTEM = (
+    "You are a compliance synthesizer. Given evidence from automated scanners, "
+    "produce a structured verdict. Only emit 'satisfied' when evidence explicitly "
+    "confirms the control. Emit 'gap' when findings show a control failure. "
+    "Emit 'not_assessable' when evidence is insufficient or tool errors occurred. "
+    "Base reasoning strictly on the provided evidence — do not invent claims."
+)
+
+_VERIFIER_SYSTEM = (
+    "You are a compliance verifier. Review the draft verdict against the collected evidence. "
+    "Reject any verdict whose rationale goes beyond or contradicts the provided scanner evidence. "
+    "Reject 'satisfied' or 'partial' verdicts that lack concrete supporting evidence. "
+    "Approve otherwise."
+)
+
+
+# ── State ──────────────────────────────────────────────────────────────────────
+
+
+class ComplianceState(TypedDict):
+    """Typed state threaded through every node in the compliance graph.
+
+    verdicts uses operator.add so finalize_control appends without overwriting
+    prior controls' completed verdicts.
+    """
+
+    repo_root: str  # absolute path string; loaded once, never mutated
+    controls: list[dict]  # serialized ControlEntry (model_dump); immutable after START
+    control_idx: int  # index of the control currently being assessed
+    collection: dict | None  # CollectionResult.model_dump() for current control
+    draft_verdict: dict | None  # ControlVerdict.model_dump() pending verifier approval
+    verifier_attempts: int  # how many times verify has run for the current control
+    verifier_notes: list[str]  # rejection notes accumulated from the verifier (cleared per control)
+    verdicts: Annotated[list[dict], operator.add]  # finalized ControlVerdict dicts, one per control
+    run_id: str
+    started_at: str
+    model_id: str
+    final_report: dict | None  # FinalReport.model_dump(); set by final_node
+
+
+# ── Prompt helpers ─────────────────────────────────────────────────────────────
+
+
+def _synthesizer_human(
+    control: ControlEntry,
+    collection: CollectionResult,
+    verifier_notes: list[str],
+    attempt: int,
+) -> str:
+    """Build the human turn for the Synthesizer node."""
+    parts = [
+        f"Control: {control.id} — {control.name}",
+        f"Positive evidence: {control.positive_evidence}",
+        f"Gap evidence: {control.gap_evidence}",
+        "",
+        f"Scanner evidence ({len(collection.evidence)} items):",
+    ]
+    for ref in collection.evidence:
+        excerpt = ref.excerpt[:200].replace("\n", " ")
+        parts.append(f"  [{ref.source_type}] {ref.path_or_id}: {excerpt}")
+    if not collection.evidence:
+        parts.append("  (none)")
+    if collection.errors:
+        parts.append(
+            f"\nTool errors (treat as not_assessable signal): {'; '.join(collection.errors)}"
+        )
+    if collection.limitations:
+        parts.append(f"Limitations: {'; '.join(collection.limitations)}")
+    if verifier_notes and attempt > 1:
+        parts.append(f"\nVerifier rejected attempt {attempt - 1}: {'; '.join(verifier_notes)}")
+        parts.append("Please revise your verdict to address the feedback.")
+    parts.append("\nProduce a SynthesizerOutput (verdict + rationale + confidence).")
+    return "\n".join(parts)
+
+
+def _verifier_human(draft: ControlVerdict, collection: CollectionResult) -> str:
+    """Build the human turn for the Verifier node."""
+    parts = [
+        f"Draft verdict for {draft.control_id}: {draft.verdict.value}",
+        f"Reasoning: {draft.rationale}",
+        "",
+        f"Full scanner evidence ({len(collection.evidence)} items):",
+    ]
+    for ref in collection.evidence:
+        excerpt = ref.excerpt[:200].replace("\n", " ")
+        parts.append(f"  [{ref.source_type}] {ref.path_or_id}: {excerpt}")
+    if not collection.evidence:
+        parts.append("  (none)")
+    if collection.errors:
+        parts.append(f"\nTool errors: {'; '.join(collection.errors)}")
+    parts.append(
+        "\nApprove if the verdict is grounded in the evidence. "
+        "Reject any affirmative verdict whose rationale is not supported by the scanner evidence above."
+    )
+    return "\n".join(parts)
+
+
+# ── Graph builder ──────────────────────────────────────────────────────────────
+
+
+def _build_graph(synthesizer: Any = None, verifier: Any = None):
+    """Build and compile the compliance StateGraph.
+
+    synthesizer and verifier are already-structured models (after with_structured_output).
+    Pass them explicitly for testing; leave None for production (lazy init from CHAT_MODEL).
+
+    The LLMs are only initialized on first node invocation, so importing this module
+    or calling _build_graph() itself does not require CHAT_MODEL to be set.
+    """
+
+    def _get_synthesizer():
+        if synthesizer is not None:
+            return synthesizer
+        return init_chat_model(os.environ["CHAT_MODEL"]).with_structured_output(SynthesizerOutput)
+
+    def _get_verifier():
+        if verifier is not None:
+            return verifier
+        return init_chat_model(os.environ["CHAT_MODEL"]).with_structured_output(VerifierDecision)
+
+    # ── Nodes ──────────────────────────────────────────────────────────────────
+
+    def supervisor_node(state: ComplianceState) -> dict:
+        """Routing checkpoint — no side effects; conditional edge does all routing."""
+        return {}
+
+    def collect_node(state: ComplianceState) -> dict:
+        """Run the Evidence Collector for the current control (deterministic, no LLM)."""
+        control = ControlEntry.model_validate(state["controls"][state["control_idx"]])
+        repo_root = Path(state["repo_root"])
+        result = collect_evidence(repo_root, control)
+        return {
+            "collection": result.model_dump(),
+            # Reset per-control verifier state for each fresh evidence run.
+            "verifier_attempts": 0,
+            "verifier_notes": [],
+            "draft_verdict": None,
+        }
+
+    def synthesize_node(state: ComplianceState) -> dict:
+        """LLM Synthesizer: evidence → draft ControlVerdict (verdict + reasoning only)."""
+        control = ControlEntry.model_validate(state["controls"][state["control_idx"]])
+        collection = CollectionResult.model_validate(state["collection"])
+        attempt = state["verifier_attempts"] + 1
+        verifier_notes = state["verifier_notes"]
+
+        messages = [
+            ("system", _SYNTHESIZER_SYSTEM),
+            ("human", _synthesizer_human(control, collection, verifier_notes, attempt)),
+        ]
+        output = cast(SynthesizerOutput, _get_synthesizer().invoke(messages))
+
+        # Merge LLM output with provenance fields the LLM must not control.
+        draft = ControlVerdict(
+            control_id=control.id,
+            verdict=output.verdict,
+            evidence=collection.evidence,  # evidence always from scanner, never LLM-invented
+            rationale=output.rationale,
+            confidence=output.confidence,
+            verifier_status="not_run",
+            attempt=attempt,
+        )
+        return {"draft_verdict": draft.model_dump()}
+
+    def verify_node(state: ComplianceState) -> dict:
+        """LLM Verifier: approve or reject the draft verdict; increment attempt counter."""
+        draft = ControlVerdict.model_validate(state["draft_verdict"])
+        collection = CollectionResult.model_validate(state["collection"])
+        attempts = state["verifier_attempts"] + 1
+
+        messages = [
+            ("system", _VERIFIER_SYSTEM),
+            ("human", _verifier_human(draft, collection)),
+        ]
+        decision = cast(VerifierDecision, _get_verifier().invoke(messages))
+
+        new_status = "passed" if decision.approved else "failed"
+        updated_notes = state["verifier_notes"] + (
+            [decision.notes] if not decision.approved else []
+        )
+        return {
+            "verifier_attempts": attempts,
+            "verifier_notes": updated_notes,
+            "draft_verdict": {**draft.model_dump(), "verifier_status": new_status},
+        }
+
+    def finalize_control_node(state: ComplianceState) -> dict:
+        """Commit the current verdict; enforce fail-closed invariants before emitting.
+
+        Two downgrade paths:
+        1. Fail-closed guard: any affirmative (non-not_assessable) verdict without scanner
+           evidence or with collection errors is downgraded to not_assessable, regardless
+           of what the LLM decided. Deterministic code check, not a prompt instruction.
+        2. Verifier exhausted: loop cap reached without approval — downgrade to not_assessable
+           with the accumulated verifier rejection notes.
+        """
+        draft = ControlVerdict.model_validate(state["draft_verdict"])
+        collection = CollectionResult.model_validate(state["collection"])
+        attempts = state["verifier_attempts"]
+
+        # Guard 1 — fail-closed: any affirmative verdict requires scanner evidence and
+        # no tool errors. not_assessable is exempt because the LLM already degraded.
+        # This enforces AGENTS.md #7: every verdict must include evidence or be not_assessable.
+        if draft.verdict != VerdictClass.not_assessable and (
+            collection.errors or not collection.evidence
+        ):
+            error_detail = (
+                "; ".join(collection.errors) if collection.errors else "no scanner evidence"
+            )
+            draft = draft.model_copy(
+                update={
+                    "verdict": VerdictClass.not_assessable,
+                    "verifier_status": "failed",
+                    "verifier_notes": f"[fail-closed: {error_detail}]",
+                    "rationale": (
+                        f"[fail-closed: {draft.verdict.value} requires concrete scanner evidence"
+                        f" ({error_detail})] {draft.rationale}"
+                    ),
+                }
+            )
+        # Guard 2 — verifier exhausted: downgrade after cap is reached.
+        elif draft.verifier_status != "passed" and attempts >= MAX_VERIFIER_ATTEMPTS:
+            notes_str = "; ".join(state["verifier_notes"])
+            draft = draft.model_copy(
+                update={
+                    "verdict": VerdictClass.not_assessable,
+                    "verifier_status": "failed",
+                    "verifier_notes": (
+                        f"[verifier-exhausted after {attempts} attempts]"
+                        + (f" {notes_str}" if notes_str else "")
+                    ),
+                    "rationale": (
+                        f"[verifier-exhausted after {attempts} attempts] {draft.rationale}"
+                        + (f" | Verifier notes: {notes_str}" if notes_str else "")
+                    ),
+                }
+            )
+
+        return {
+            "verdicts": [draft.model_dump()],  # operator.add appends to the accumulated list
+            "control_idx": state["control_idx"] + 1,
+            "draft_verdict": None,
+            "collection": None,
+        }
+
+    def final_node(state: ComplianceState) -> dict:
+        """Compile all finalized verdicts into a FinalReport with audit metadata."""
+        verdicts = [ControlVerdict.model_validate(v) for v in state["verdicts"]]
+        report = FinalReport(
+            repo_path=state["repo_root"],
+            verdicts=verdicts,
+            audit={
+                "run_id": state["run_id"],
+                "started_at": state["started_at"],
+                "model_id": state["model_id"],
+                "controls_assessed": len(verdicts),
+                "satisfied_count": sum(1 for v in verdicts if v.verdict == VerdictClass.satisfied),
+                "partial_count": sum(1 for v in verdicts if v.verdict == VerdictClass.partial),
+                "gap_count": sum(1 for v in verdicts if v.verdict == VerdictClass.gap),
+                "not_assessable_count": sum(
+                    1 for v in verdicts if v.verdict == VerdictClass.not_assessable
+                ),
+            },
+        )
+        return {"final_report": report.model_dump()}
+
+    # ── Routing ────────────────────────────────────────────────────────────────
+
+    def route_supervisor(state: ComplianceState) -> str:
+        """Route to 'collect' for the next control, or 'final' when all controls are done."""
+        if state["control_idx"] >= len(state["controls"]):
+            return "final"
+        return "collect"
+
+    def route_verify(state: ComplianceState) -> str:
+        """Approve → finalize; rejected + retries remain → synthesize; exhausted → finalize."""
+        draft = ControlVerdict.model_validate(state["draft_verdict"])
+        if draft.verifier_status == "passed":
+            return "finalize_control"
+        if state["verifier_attempts"] >= MAX_VERIFIER_ATTEMPTS:
+            return "finalize_control"  # exhausted; finalize_control handles downgrade
+        return "synthesize"
+
+    # ── Assemble ───────────────────────────────────────────────────────────────
+
+    builder = StateGraph(ComplianceState)
+    builder.add_node("supervisor", supervisor_node)
+    builder.add_node("collect", collect_node)
+    builder.add_node("synthesize", synthesize_node)
+    builder.add_node("verify", verify_node)
+    builder.add_node("finalize_control", finalize_control_node)
+    builder.add_node("final", final_node)
+
+    builder.add_edge(START, "supervisor")
+    builder.add_conditional_edges(
+        "supervisor", route_supervisor, {"collect": "collect", "final": "final"}
+    )
+    builder.add_edge("collect", "synthesize")
+    builder.add_edge("synthesize", "verify")
+    builder.add_conditional_edges(
+        "verify",
+        route_verify,
+        {"finalize_control": "finalize_control", "synthesize": "synthesize"},
+    )
+    builder.add_edge("finalize_control", "supervisor")
+    builder.add_edge("final", END)
+
+    return builder.compile()
+
+
+# ── Public API ─────────────────────────────────────────────────────────────────
+
+
+def _initial_state(
+    repo_root: Path,
+    controls: list[ControlEntry],
+    model_id: str = "unset",
+) -> ComplianceState:
+    """Build the initial ComplianceState for a fresh run."""
+    return ComplianceState(
+        repo_root=str(repo_root.resolve()),
+        controls=[c.model_dump() for c in controls],
+        control_idx=0,
+        collection=None,
+        draft_verdict=None,
+        verifier_attempts=0,
+        verifier_notes=[],
+        verdicts=[],
+        run_id=str(uuid.uuid4()),
+        started_at=datetime.now(UTC).isoformat(),
+        model_id=model_id,
+        final_report=None,
+    )
+
+
+def run_assessment(
+    repo_root: Path,
+    controls: list[ControlEntry] | None = None,
+    synthesizer: Any = None,
+    verifier: Any = None,
+) -> FinalReport:
+    """Assess repo_root against controls and return a FinalReport.
+
+    controls defaults to all controls in data/controls.yaml.
+    synthesizer and verifier can be injected for testing (pre-structured models).
+    """
+    if controls is None:
+        controls = load_controls()
+    model_id = os.environ.get("CHAT_MODEL", "unset")
+    state = _initial_state(repo_root, controls, model_id=model_id)
+    compiled = _build_graph(synthesizer=synthesizer, verifier=verifier)
+    result = compiled.invoke(state, config={"recursion_limit": GRAPH_RECURSION_LIMIT})
+    return FinalReport.model_validate(result["final_report"])
+
+
+# Module-level compiled graph for `langgraph dev` / Studio (matches langgraph.json).
+# LLMs are initialized lazily on first node invocation — this line is safe without
+# CHAT_MODEL set in the environment.
+graph = _build_graph()

@@ -17,7 +17,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .kb import _DEFAULT_CONTROLS_PATH, ControlEntry, build_exact_index, load_controls
+from .kb import (
+    _DEFAULT_CONTROLS_PATH,
+    ControlEntry,
+    build_exact_index,
+    ingest_controls,
+    load_controls,
+)
 
 
 class ControlsRetriever:
@@ -59,8 +65,6 @@ class ControlsRetriever:
         embeddings defaults to init_embeddings() (reads EMBEDDINGS_MODEL env var).
         store_path is optional; omit for an ephemeral in-memory store.
         """
-        from .kb import ingest_controls  # noqa: PLC0415
-
         if controls_path is None:
             controls_path = _DEFAULT_CONTROLS_PATH
         controls = load_controls(controls_path)

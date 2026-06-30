@@ -1,11 +1,13 @@
 """MCP tool functions — schema validation and scanner behaviour."""
 
+import asyncio
+import os
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from agentic_compliance.repo_loader import MAX_FILE_BYTES
+from agentic_compliance.repo_loader import MAX_FILE_BYTES, resolve_repo_input
 from agentic_compliance.schemas import RepoFileListing, ToolFinding
 from agentic_compliance.tools import (
     list_repo_files,
@@ -143,10 +145,6 @@ class TestReadFileSliceTool:
         local inputs, causing the allowlist comparison in read_file_slice to always fail
         with 'not an allowed file' even for valid files.
         """
-        import os  # noqa: PLC0415
-
-        from agentic_compliance.repo_loader import resolve_repo_input  # noqa: PLC0415
-
         original = os.getcwd()
         try:
             # cd to the test root so the fixture path is a relative string
@@ -463,8 +461,6 @@ class TestMCPServer:
     @pytest.mark.agent
     def test_mcp_server_exposes_five_tools(self):
         """FastMCP instance has exactly the five declared tools."""
-        import asyncio  # noqa: PLC0415
-
         from agentic_compliance.mcp_server import mcp  # noqa: PLC0415
 
         tools = asyncio.run(mcp.list_tools())

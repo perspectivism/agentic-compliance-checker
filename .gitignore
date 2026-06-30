@@ -23,12 +23,13 @@ env/
 !.env.example
 
 # Runtime state
-chroma_db/          # persisted controls knowledge base (regenerate with `ingest-controls`)
-artifacts/          # eval reports + generated assessment reports
-logs/               # JSONL run logs (M8)
-traces/             # exported traces (M8)
-/tmp_clones/        # scratch space for cloned target repos
-*.sqlite            # stray local DBs (e.g. a LangGraph SQLite checkpointer)
+.langgraph_api/
+chroma_db/
+artifacts/
+logs/
+traces/
+/tmp_clones/
+*.sqlite
 *.db
 
 # Private build tooling

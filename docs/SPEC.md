@@ -99,21 +99,21 @@ class EvidenceRef(BaseModel):
 
 ```text
 Supervisor
-  ├── Control Retriever
   ├── Evidence Collector
   ├── Synthesizer
   └── Verifier
 ```
 
+Controls are pre-loaded into graph state from `data/controls.yaml` before the graph
+starts — no per-control retrieval step is needed inside the graph for the fixed rubric.
+A semantic `ControlsRetriever` (exact + embedding search) is implemented and available
+but not yet wired as a graph node; it can be added when the rubric grows beyond what
+pre-loading handles cleanly.
+
 ### Supervisor
 Owns graph routing, iteration count, and stop conditions. It does not make compliance
 judgments — routing decisions are mechanical (check verifier result, check attempt
 counter, select next node).
-
-### Control Retriever
-Retrieves control context (requirement text, evidence hints, scanner hints) from the
-controls KB for the current control ID. It does not access the target repo or produce
-repo evidence.
 
 ### Evidence Collector
 Calls read-only MCP tools against the target repo and normalizes tool results into
@@ -121,16 +121,17 @@ Calls read-only MCP tools against the target repo and normalizes tool results in
 files directly.
 
 ### Synthesizer
-Drafts a `ControlVerdict` by reasoning over retrieved control context and collected
-evidence. It must not invent evidence — every cited `EvidenceRef` must originate from
-the Evidence Collector's output.
+Drafts a `ControlVerdict` by reasoning over control rubric context (from pre-loaded
+state) and collected evidence. It must not invent evidence — every cited `EvidenceRef`
+must originate from the Evidence Collector's output.
 
 ### Verifier
 Checks whether the draft verdict's claims are supported by cited evidence. It does not
 call tools or discover new facts. On failure, it reports the unsupported claim. The
-Supervisor may route back to retrieval or collection, up to `max_verifier_attempts`.
-When the cap is reached, it emits a downgraded verdict with `verifier_status: "failed"`
-and notes explaining what was unsupported.
+Supervisor may route back to Synthesize, up to `max_verifier_attempts` (evidence is
+already in state; re-collection is not needed on retry). When the cap is reached, the
+verdict is downgraded with `verifier_status: "failed"` and notes explaining what was
+unsupported.
 
 ## Typed graph state
 
@@ -138,19 +139,18 @@ Minimum fields:
 
 ```python
 class ComplianceState(TypedDict):
-    request_id: str
-    repo_path: str
-    selected_controls: list[str]
-    current_control_id: str | None
-    control_contexts: list[dict]
-    evidence: list[dict]
-    draft_verdicts: list[dict]
-    final_verdicts: list[dict]
-    verifier_attempts: int
-    max_verifier_attempts: int
-    remaining_steps: int
-    errors: list[dict]
-    next_node: str
+    repo_root: str                              # absolute path; immutable after START
+    controls: list[dict]                        # serialized ControlEntry; immutable after START
+    control_idx: int                            # index of the control currently being assessed
+    collection: dict | None                     # CollectionResult for the current control
+    draft_verdict: dict | None                  # ControlVerdict pending verifier approval
+    verifier_attempts: int                      # verify calls for the current control
+    verifier_notes: list[str]                   # rejection notes from verifier (cleared per control)
+    verdicts: Annotated[list[dict], operator.add]  # finalized verdicts; appended by FinalizeControl
+    run_id: str
+    started_at: str
+    model_id: str
+    final_report: dict | None                   # FinalReport; set by final_node
 ```
 
 `max_verifier_attempts` defaults to `3`, set at graph initialization from the

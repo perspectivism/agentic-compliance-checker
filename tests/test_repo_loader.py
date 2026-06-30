@@ -242,8 +242,6 @@ class TestResolveRepoInput:
 
     def test_local_path_is_always_absolute(self):
         """resolve_repo_input returns an absolute path even for a relative input."""
-        import os  # noqa: PLC0415
-
         original = os.getcwd()
         try:
             os.chdir(FIXTURES)

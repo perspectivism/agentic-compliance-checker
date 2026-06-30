@@ -10,16 +10,16 @@ it — a revised decision with a reason is part of the record.
 ---
 
 ### D1 — Orchestration: an explicit LangGraph `StateGraph`, not a prebuilt agent harness
-**Context.** The output is a bounded, known-shape pipeline (retrieve → scan → synthesize
+**Context.** The output is a bounded, known-shape pipeline (collect → synthesize
 → verify → loop-if-weak) with a hard cap. The Lang stack offers three levels of
 abstraction for this, and they are layers, not rivals: LangGraph (the graph runtime),
 `create_agent` (a light prebuilt agent loop on top of it), and `deepagents` (a heavy
 harness on top of that, bundling a planner, subagents, and a virtual filesystem).
 **Decision.** Build the orchestration as an explicit `StateGraph` — a supervisor routing
-to specialist nodes, with a conditional edge implementing the verifier loop. The leaf
-nodes are themselves `create_agent` agents; the two layers compose (a compiled agent/graph
-is just a node), so this is "LangGraph **and** `create_agent`," used at the levels where
-each fits.
+to specialist nodes, with a conditional edge implementing the verifier loop. LLM leaf
+nodes (Synthesizer, Verifier) are plain Python functions calling
+`llm.with_structured_output(Schema).invoke(messages)`; `create_agent` is not needed
+because each node makes a single structured call, not a multi-turn tool-use loop.
 **Rejected.**
 - (a) A single `create_agent` with all tools + a long system prompt — collapses the
   topology into one model-driven loop and *hides* the control-flow engineering that is
@@ -29,25 +29,30 @@ each fits.
   This task is the opposite: the path is known, so the planner/subagent/filesystem
   machinery is overhead, and its "trust-the-LLM" default is the wrong posture when
   bounded, auditable, evidence-backed verdicts are the entire point.
-- (c) A linear retrieve-then-generate chain — no way to re-retrieve when a verdict is
-  unsupported.
+- (c) A linear collect-then-generate chain — no way to re-synthesize (or later
+  re-retrieve) when a verdict is unsupported.
 **Why this is right here, not dogma.** For a single agent with a couple of tools,
 `create_agent` alone would be correct and a graph would be over-engineering. The verifier
 self-correction loop is the control-flow requirement that tips it to an explicit graph
 (LangChain's own guidance: drop to LangGraph when the agent loop isn't the right shape).
 If a sub-task ever became genuinely open-ended (e.g. "investigate this sprawling
 monorepo"), a deep-agent could slot in as a single node without changing the spine.
-**Status:** confirm after M5.
+**Status:** confirmed (M5). Explicit `StateGraph` with conditional edges; verifier loop
+capped by `MAX_VERIFIER_ATTEMPTS` counter and `GRAPH_RECURSION_LIMIT`.
 
 ### D2 — Hybrid RAG: semantic over controls, deterministic over the repo
 **Context.** Two very different inputs: control *text* (fuzzy) and repo *evidence* (exact).
-**Decision.** Semantic retrieval over the control/rubric KB; deterministic
-regex/AST/structured scans over the repo via MCP tools.
+**Decision.** Semantic retrieval over the control/rubric KB for dynamic control
+selection; deterministic regex/AST/structured scans over the repo via MCP tools.
+For the fixed v1 rubric (14 controls), the KB is pre-loaded at assess time — semantic
+retrieval is built and available but not yet on the assess critical path.
 **Rejected.** (a) Embed everything — vector search over Terraform is unreliable for
 exact attributes ("is `storage_encrypted = true` present"). (b) Pure structured —
 misses fuzzy "which control is relevant" matching. Naming this split is a deliberate
 design choice, not an accident.
-**Status:** confirm after M3/M4.
+**Status:** confirmed (M3/M4). M5 pre-loads all controls into graph state via exact
+`load_controls()` lookup; semantic retrieval via `ControlsRetriever` is available but
+not yet wired as a graph node — sufficient for the fixed 14-control rubric.
 
 ### D3 — Tools exposed over a self-built MCP server (not in-process functions)
 **Context.** The agent needs read-only repo-inspection tools; control lookup is handled by RAG over the controls KB, not an MCP tool.
@@ -62,12 +67,13 @@ that it's not load-bearing, is the point.
 ### D4 — Verifier self-correction loop as the trust mechanism
 **Context.** For a compliance tool, a confidently-wrong "satisfied" is the failure
 mode that matters most.
-**Decision.** Every "satisfied" verdict must cite real file/line evidence; the verifier
-rejects unsupported verdicts and routes back to re-retrieve/re-scan, capped by an
-attempt counter **and** the LangGraph recursion limit.
+**Decision.** Every affirmative verdict must cite real scanner evidence; the verifier
+rejects unsupported verdicts and routes back to re-synthesize (evidence already in state;
+no re-scan needed), capped by an attempt counter **and** the LangGraph recursion limit.
 **Rejected.** Single-pass generation — plausible but ungrounded verdicts. The loop is
 the centerpiece differentiator.
-**Status:** confirm after M5.
+**Status:** confirmed (M5). Loop capped at `MAX_VERIFIER_ATTEMPTS=3`; exhausted loop
+force-downgrades to `not_assessable` with verifier notes in the rationale field.
 
 ### D5 — Scope: ~15 code-detectable technical controls, not a full baseline
 **Context.** Most NIST 800-53 controls are procedural and not evidenceable from code.
@@ -120,7 +126,8 @@ agent will then faithfully implement, blind spots and all.
 A non-root container (which also happens to satisfy control CM-2/CM-6). KB and reports
 are volumes; API keys via `.env`.
 **Rejected.** A separate MCP container — an unnecessary process boundary for a stdio server.
-**Status:** confirm after M2/M5.
+**Status:** confirmed (M2/M5). MCP server implemented; CLI `assess` subcommand wired to
+`run_assessment` in M5. Docker packaging deferred to M8.
 
 ### D11 — Interface: CLI + rendered report, no custom web frontend
 **Context.** The output is a structured report, consumed programmatically.

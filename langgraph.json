@@ -2,7 +2,7 @@
   "$schema": "https://langgra.ph/schema.json",
   "dependencies": ["."],
   "graphs": {
-    "compliance": "./src/agentic_compliance/graph.py:graph"
+    "compliance": "agentic_compliance.graph:graph"
   },
   "env": "./.env",
   "python_version": "3.12"

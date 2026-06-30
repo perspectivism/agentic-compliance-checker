@@ -138,9 +138,9 @@ Pass condition:
 - Synthesizer node using structured output.
 - Verifier node.
 - Conditional edge from verifier:
-  - pass -> final
-  - fail and attempts remain -> retrieve/evidence/synthesize again
-  - fail and attempts exhausted -> downgraded final with verifier failure notes
+  - pass -> FinalizeControl
+  - fail and attempts remain -> synthesize again (controls pre-loaded in state; no re-collect)
+  - fail and attempts exhausted -> FinalizeControl downgrades to not_assessable
 - Recursion limit.
 - Max verifier attempts.
 - Expose the compiled graph as a module-level `graph` in `src/agentic_compliance/graph.py` so `langgraph dev` / Studio can load it (matches `langgraph.json`).
@@ -155,6 +155,8 @@ Pass condition:
 ### Acceptance gate
 ```bash
 .venv/bin/python -m pytest tests/test_graph.py
+# langgraph dev requires the studio extras (pip install -e ".[dev,agent,studio]"):
+# langgraph.json must use module path "agentic_compliance.graph:graph" (not file path)
 .venv/bin/langgraph dev      # Studio renders the supervisor + verifier-loop topology
 ```
 

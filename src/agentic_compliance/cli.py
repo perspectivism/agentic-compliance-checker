@@ -2,12 +2,7 @@
 
 This is intentionally a thin dispatcher. Heavy modules (LangGraph, the MCP client,
 the vector store) are imported lazily *inside* each subcommand so that `--help`
-and not-yet-implemented milestones stay runnable from day one — `docker compose run`
-works immediately, and each subcommand prints an honest "implemented at Mx" message
-until the corresponding milestone lands.
-
-As you implement each milestone, replace the `_not_implemented(...)` call in the
-matching command with the real wiring (the import hints in each function show where).
+stays fast and runnable from day one without the full agent stack installed.
 """
 
 from __future__ import annotations
@@ -16,28 +11,50 @@ import argparse
 import sys
 
 
-def _not_implemented(feature: str, milestone: str) -> int:
-    print(
-        f"[agentic-compliance] '{feature}' is implemented at milestone {milestone}.\n"
-        f"It is not wired up yet — see docs/MILESTONES.md.",
-        file=sys.stderr,
-    )
-    return 2
-
-
 def cmd_assess(args: argparse.Namespace) -> int:
-    # M5 wiring:
-    #   from .repo_loader import resolve_repo_input  # safe clone (URL) or local path
-    #   from .graph import run_assessment            # supervisor + verifier loop (M5)
-    #   path = resolve_repo_input(args.repo_url or args.repo_path)
-    #   report = run_assessment(path, controls=args.controls)
-    #   write_report(report, args.out, args.format)
+    import json  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    from .graph import run_assessment  # noqa: PLC0415
+    from .kb import build_exact_index, load_controls  # noqa: PLC0415
+    from .repo_loader import resolve_repo_input  # noqa: PLC0415
+
     if not args.repo_url and not args.repo_path:
         print(
             "Provide --repo-url <public GitHub URL> or --repo-path <local path>.", file=sys.stderr
         )
         return 2
-    return _not_implemented("assess", "M5")
+
+    target = args.repo_url or args.repo_path
+    repo_root = resolve_repo_input(target)
+
+    controls = None
+    if args.controls:
+        index = build_exact_index(load_controls())
+        ids = [c.strip() for c in args.controls.split(",")]
+        controls = [index[i] for i in ids if i in index]
+        missing = [i for i in ids if i not in index]
+        if missing:
+            print(f"[agentic-compliance] Unknown control IDs: {missing}", file=sys.stderr)
+            return 2
+
+    print(f"[agentic-compliance] Assessing {repo_root} …", flush=True)
+    report = run_assessment(repo_root, controls=controls)
+
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if args.format == "json":
+        out_path.write_text(json.dumps(report.model_dump(mode="json"), indent=2))
+    else:
+        lines = [f"# Compliance Report\n\nRepo: {report.repo_path}\n"]
+        for v in report.verdicts:
+            lines.append(f"## {v.control_id}: {v.verdict.value}")
+            lines.append(f"{v.rationale}\n")
+        out_path.write_text("\n".join(lines))
+
+    print(f"[agentic-compliance] Report written to {out_path}", flush=True)
+    return 0
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
@@ -56,9 +73,12 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
 
 def cmd_eval(args: argparse.Namespace) -> int:
-    # M7 wiring: delegate to scripts/run_eval.py or import the eval module.
-    #   from .eval import run_eval; return run_eval()
-    return _not_implemented("eval", "M7")
+    # Implemented at M7.
+    print(
+        "[agentic-compliance] 'eval' is not yet implemented — see docs/MILESTONES.md M7.",
+        file=sys.stderr,
+    )
+    return 2
 
 
 def build_parser() -> argparse.ArgumentParser:

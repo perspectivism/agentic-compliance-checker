@@ -9,12 +9,12 @@ The project is done when all items below are true.
 - [x] MCP tools return structured outputs.
 - [x] Controls KB exists.
 - [x] Retriever supports exact and semantic lookup.
-- [ ] LangGraph `StateGraph` implemented.
-- [ ] Typed graph state implemented.
-- [ ] Synthesizer produces structured verdicts.
-- [ ] Verifier loop implemented.
-- [ ] Loop has attempt cap and recursion limit.
-- [ ] Final report generated.
+- [x] LangGraph `StateGraph` implemented.
+- [x] Typed graph state implemented.
+- [x] Synthesizer produces structured verdicts.
+- [x] Verifier loop implemented.
+- [x] Loop has attempt cap and recursion limit.
+- [x] Final report generated.
 
 ## Tests
 
@@ -22,7 +22,7 @@ The project is done when all items below are true.
 - [x] M2 tests pass.
 - [x] M3 tests pass.
 - [x] M4 tests pass.
-- [ ] M5 tests pass.
+- [x] M5 tests pass.
 - [ ] M6 tests pass.
 - [ ] M7 tests pass.
 - [ ] M8 tests pass.

@@ -7,15 +7,15 @@ explicit orchestration, tools, grounded verification, evaluation, and observabil
 rather than prompt engineering.
 
 Point it at a public GitHub URL (shallow clone, read-only) or a local path; it
-never executes repo content, retrieves rubric context for each control from the
-knowledge base, runs deterministic evidence scans against the repo, drafts a verdict
-per control, and a **verifier loop** rejects any "satisfied" verdict that isn't backed
-by a real file/line — re-scanning until the claim is backed or a cap is hit.
+never executes repo content, pre-loads a rubric of controls from the knowledge base,
+runs deterministic evidence scans against the repo, drafts a verdict per control, and
+a **verifier loop** rejects any verdict that isn't backed by concrete scanner evidence
+— re-synthesizing with the verifier's notes until the claim is grounded or a cap is hit.
 
 ## What it does
 Multi-agent orchestration on LangGraph · typed state and explicit control flow · a
 conditional verifier self-correction loop · a self-built MCP server for structured
-repo analysis · RAG over the controls KB · deterministic MCP tools over the repo ·
+repo analysis · a controls KB with semantic retriever (pre-loaded at assess time for the v1 rubric; dynamic control selection planned) · deterministic MCP tools over the repo ·
 evidence-backed verdicts · a two-layer evaluation harness (grounding + verdict
 accuracy) · unit tests and milestone gates · observability · and secure-by-default,
 fail-closed ingestion of untrusted repositories.
@@ -26,28 +26,28 @@ fail-closed ingestion of untrusted repositories.
 flowchart TD
     CLI([CLI<br/>assess target])
 
-    CLI -->|"① validate + prepare target"| LOADER[Safe Repo Loader<br/>validate · bound · no execution]
+    CLI -->|validate + prepare target| LOADER[Safe Repo Loader<br/>validate · bound · no execution]
     LOADER -->|produces| REPO[(target repo<br/>untrusted · never executed)]
 
-    CLI -->|"② run assessment"| SUPERVISOR
+    CLI -->|run assessment| SUPERVISOR
 
-    subgraph GRAPH [assessment graph]
-        SUPERVISOR[Supervisor<br/>routing · iteration · stop]
+    subgraph GRAPH [assessment graph · controls in state]
+        SUPERVISOR[Supervisor<br/>routing · control_idx · stop]
 
-        SUPERVISOR -->|1 · retrieve context| RETRIEVER[Control Retriever<br/>RAG / exact+semantic lookup]
-        RETRIEVER -->|retrieve| KB[(controls KB<br/>trusted)]
-
-        SUPERVISOR -->|2 · collect evidence| COLLECTOR[Evidence Collector<br/>deterministic MCP tools]
+        SUPERVISOR -->|collect evidence| COLLECTOR[Evidence Collector<br/>deterministic MCP tools]
         COLLECTOR -. stdio .-> MCP[[read-only MCP tools]]
 
-        SUPERVISOR -->|3 · synthesize| SYNTH[Synthesizer<br/>LLM · structured verdict]
-        SUPERVISOR -->|4 · verify| VERIFIER{Verifier · LLM<br/>claim backed by evidence?}
+        COLLECTOR -->|synthesize| SYNTH[Synthesizer<br/>LLM · structured verdict]
+        SYNTH -->|verify| VERIFIER{Verifier · LLM<br/>claim backed by evidence?}
 
-        VERIFIER -->|yes| PASS([evidence-backed report])
-        VERIFIER -->|no · attempts remain| SUPERVISOR
-        VERIFIER -->|no · cap reached| FAIL([downgraded report<br/>verifier failed])
+        VERIFIER -->|approved or cap reached| FINALIZE[FinalizeControl<br/>commit · downgrade if exhausted]
+        FINALIZE -->|"advance to next control"| SUPERVISOR
+        VERIFIER -->|"rejected · retries remain"| SYNTH
     end
 
+    SUPERVISOR -->|all controls assessed| FINAL([FinalReport + audit log])
+
+    KB[(controls KB<br/>trusted)] -->|"loaded before graph starts"| SUPERVISOR
     MCP -->|read-only| REPO
 ```
 
@@ -59,14 +59,13 @@ Detailed component diagram and the deterministic-vs-LLM split: [`docs/ARCHITECTU
 
 **Two data sources, two trust levels.** The controls knowledge base (Chroma by default) holds a rubric of NIST 800-53-inspired controls with definitions, evidence expectations, and pass/fail thresholds. It is trusted, static, and ingested once (`make ingest`). The target repository is untrusted and is never embedded into the vector store; it is inspected read-only through deterministic MCP tools.
 
-**Per-control flow.** The Supervisor routes each control through four nodes in sequence:
+**Per-control flow.** The Supervisor routes each control through three nodes in sequence:
 
-1. **Control Retriever** (RAG) — retrieves rubric text, scanner hints, and evidence expectations from the controls KB for the current control using exact ID lookup and semantic search. The Supervisor owns control selection and routing; the Retriever supplies the context for each.
-2. **Evidence Collector** (deterministic MCP tools) — runs structured, read-only scanners against the repo: credential patterns, IaC misconfigurations, CI workflow gaps. Evidence facts come from tool outputs, not LLM inference.
-3. **Synthesizer** (LLM) — takes control context from the Retriever and evidence refs from the tools and produces a structured `ControlVerdict`: verdict class, rationale, confidence, and file/line citations.
-4. **Verifier** (LLM) — checks whether the cited evidence actually supports the verdict. It operates only on what the Synthesizer provided; it makes no new tool calls.
+1. **Evidence Collector** (deterministic MCP tools) — runs structured, read-only scanners against the repo: credential patterns, IaC misconfigurations, CI workflow gaps. Evidence facts come from tool outputs, not LLM inference. Control rubric context is pre-loaded into graph state before the graph starts (from `data/controls.yaml`), so no per-control retrieval step is needed in the graph.
+2. **Synthesizer** (LLM) — takes control rubric context and evidence refs from the tools and produces a structured `ControlVerdict`: verdict class, rationale, confidence, and file/line citations.
+3. **Verifier** (LLM) — checks whether the cited evidence actually supports the verdict. It operates only on what the Synthesizer provided; it makes no new tool calls.
 
-**Verifier loop exit conditions.** If the verifier passes, the verdict is emitted. If it fails and attempts remain, the Supervisor routes back to re-collect evidence and re-synthesize. If the cap is reached, the verdict is **downgraded** — `verifier_status: "failed"` with notes explaining why the claim was unsupported. The core invariant: **no `satisfied` verdict without file/line evidence and verifier approval**.
+**Verifier loop exit conditions.** If the verifier passes, the verdict moves to `FinalizeControl`. If it fails and attempts remain, the graph routes back to re-synthesize (evidence was already collected; the Synthesizer gets the verifier's rejection notes in its next prompt). If the cap is reached, the verdict is **downgraded** — `verifier_status: "failed"` with notes explaining why the claim was unsupported. There is also a **deterministic fail-closed guard**: any verifier-approved affirmative verdict (`satisfied`, `partial`, `gap`) is downgraded to `not_assessable` if scanner evidence is empty or collection errors occurred — this is enforced in code, not just in a prompt.
 
 ## Quickstart (Docker)
 
@@ -76,7 +75,7 @@ cp .env.example .env        # set CHAT_MODEL + the matching provider key (embedd
 make build                  # build the image
 make test                   # fast test suite (-m "not agent")
 make ingest                 # build the controls knowledge base
-make assess REPO=https://github.com/OWNER/REPO  # assess a public repo  [M5+]
+make assess REPO=https://github.com/OWNER/REPO  # assess a public repo
 make eval                   # run the evaluation harness  [M7+]
 ```
 

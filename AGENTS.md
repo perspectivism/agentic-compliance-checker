@@ -32,7 +32,7 @@ It is built around production-oriented agent engineering:
 ## Target stack
 - Python 3.12+ (enforced by pyproject `requires-python`)
 - LangGraph `StateGraph`
-- LangChain 1.x `create_agent` (+ middleware)
+- LangChain 1.x (`init_chat_model` + `with_structured_output` for LLM leaf nodes)
 - Chat model via LangChain `init_chat_model` (default `CHAT_MODEL=anthropic:claude-sonnet-4-6`); embeddings via local model by default (`EMBEDDINGS_MODEL=local`, no second API key) or `openai:text-embedding-3-small`
 - Pydantic typed response schemas
 - FastMCP / MCP Python SDK
@@ -113,7 +113,7 @@ Mark any test that needs the LLM/agent stack (model/network/API keys) with `@pyt
 
 ## Coding rules
 - Select models from env via LangChain's `init_chat_model(os.environ["CHAT_MODEL"])` (and an analogous `EMBEDDINGS_MODEL` selector) — do NOT hardcode `ChatAnthropic(...)` or a specific provider/model in code. Provider switching must be a `.env` change, not a code change. Read the provider key from its SDK-native variable (the SDK auto-discovers it).
-- The explicit `StateGraph` owns orchestration; `create_agent` builds the leaf nodes. Do NOT collapse the workflow into one prebuilt agent, and do NOT pull in `deepagents` — the explicit, auditable control flow (especially the capped verifier loop) is the deliverable, not an implementation detail to abstract away. See `docs/DECISIONS.md` D1.
+- The explicit `StateGraph` owns orchestration; LLM leaf nodes (Synthesizer, Verifier) are plain Python functions calling `llm.with_structured_output(Schema).invoke(messages)` — NOT `create_agent`. Do NOT collapse the workflow into one prebuilt agent, and do NOT pull in `deepagents` — the explicit, auditable control flow (especially the capped verifier loop) is the deliverable, not an implementation detail to abstract away. See `docs/DECISIONS.md` D1.
 - Tools are read-only and perform NO network I/O. On a tool/scanner error, timeout, or unparseable result, return `not_assessable` with an error note — never swallow it into a `satisfied` and never raise an unhandled exception.
 - Keep side effects isolated.
 - Do not let LLM nodes call filesystem APIs directly.

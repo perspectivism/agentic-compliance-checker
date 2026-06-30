@@ -8,7 +8,7 @@ from agentic_compliance.evidence_collector import (
     file_excerpt_to_evidence,
     finding_to_evidence,
 )
-from agentic_compliance.kb import build_exact_index, load_controls
+from agentic_compliance.kb import ControlEntry, build_exact_index, load_controls
 from agentic_compliance.schemas import CollectionResult, EvidenceRef, ToolFinding
 
 FIXTURES = Path(__file__).parent / "fixtures" / "repos"
@@ -224,8 +224,6 @@ class TestCollectEvidenceNoEvidence:
 
     def test_no_scanner_hints_overlap_records_limitation(self):
         """A control whose scanner_hints have no matching tools records a limitation."""
-        from agentic_compliance.kb import ControlEntry  # noqa: PLC0415
-
         no_tool_control = ControlEntry(
             id="CM-3",
             name="Change control",
