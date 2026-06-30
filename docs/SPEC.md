@@ -49,19 +49,20 @@ submodules, never executed) **or** a local repository path (e.g. a test fixture)
 
 The system:
 1. Safely indexes allowed files (after a safe clone, if a URL was given).
-2. Selects relevant code-detectable controls.
-3. Retrieves control guidance from the controls KB.
-4. Runs MCP evidence tools against the repository.
-5. Drafts verdicts using a structured schema.
-6. Verifies each verdict against file/line evidence.
-7. Loops once or twice when evidence is weak; when the cap is reached, unsupported claims are downgraded.
-8. Emits a final report with:
+2. Selects relevant controls — dynamically via semantic search over the controls KB
+   (default), or from an explicit user-provided list (`--controls`).
+3. Runs MCP evidence tools against the repository for each selected control.
+4. Drafts verdicts using a structured schema.
+5. Verifies each verdict against file/line evidence.
+6. Loops once or twice when evidence is weak; when the cap is reached, unsupported claims are downgraded.
+7. Emits a final report with:
    - control ID,
    - verdict,
    - evidence file/line,
    - rationale,
    - confidence,
    - verifier status,
+   - selection metadata (mode, query, per-control relevance scores),
    - audit metadata.
 
 ## Verdict classes
@@ -95,20 +96,54 @@ class EvidenceRef(BaseModel):
     excerpt: str
 ```
 
+The final report also includes a typed selection record describing which controls were
+assessed and how they were chosen:
+
+```python
+class SelectedControl(BaseModel):
+    control_id: str
+    relevance_score: float | None  # None for explicit mode; [0, 1] for dynamic, higher=better
+
+class SelectionResult(BaseModel):
+    mode: Literal["dynamic", "explicit"]
+    top_k: int | None          # requested k; only for dynamic mode
+    detected_features: list[str]  # empty for explicit mode
+    selection_query: str          # empty for explicit mode
+    selected_controls: list[SelectedControl]  # ranking order for dynamic, user order for explicit
+
+class FinalReport(BaseModel):
+    repo_path: str
+    verdicts: list[ControlVerdict]
+    selection: SelectionResult     # typed first-class field, not buried in audit
+    audit: dict                    # run_id, started_at, model_id, verdict counts
+```
+
 ## Agent topology
 
 ```text
+Control Selection (pre-graph)
+  └── dynamic: ControlsRetriever.from_persisted → select_controls (feature detect + semantic search)
+  └── explicit: user-provided --controls list
+
 Supervisor
   ├── Evidence Collector
   ├── Synthesizer
   └── Verifier
 ```
 
-Controls are pre-loaded into graph state from `data/controls.yaml` before the graph
-starts — no per-control retrieval step is needed inside the graph for the fixed rubric.
-A semantic `ControlsRetriever` (exact + embedding search) is implemented and available
-but not yet wired as a graph node; it can be added when the rubric grows beyond what
-pre-loading handles cleanly.
+Before the graph starts, `run_assessment()` determines which controls to assess:
+
+- **Dynamic mode** (default, `controls=None`): detects repo technology features from the
+  file tree (file extensions and names), plus a bounded content read of `.tf` files for
+  Terraform resource types, builds a semantic query, and retrieves the top-k most relevant
+  controls from the persisted Chroma KB. Raises `FileNotFoundError` with a clear message
+  if the KB has not been ingested — no silent fallback to all controls.
+- **Explicit mode** (`--controls AC-6,SC-8`): wraps the user-specified list directly,
+  bypassing the retriever. Cannot be combined with `--top-k-controls`.
+
+The selected controls are loaded into graph state as serialized `ControlEntry` dicts, and
+the `SelectionResult` (mode, query, scores) is stored alongside them so `final_node` can
+record it in `FinalReport.selection` for auditing and eval.
 
 ### Supervisor
 Owns graph routing, iteration count, and stop conditions. It does not make compliance

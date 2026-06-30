@@ -25,10 +25,16 @@ _DEFAULT_STORE_PATH = Path("./chroma_db")
 
 
 class ControlEntry(BaseModel):
-    """A single control from the rubric, loaded from data/controls.yaml."""
+    """A single control from the rubric, loaded from data/controls.yaml.
+
+    id is the project's assessment slice identifier (may be a single NIST ID or a
+    compound like AU-2/AU-12 where the slice spans two controls). nist_refs lists the
+    canonical NIST SP 800-53 Rev. 5 control IDs this slice maps to.
+    """
 
     id: str
     name: str
+    nist_refs: list[str] = []
     positive_evidence: str
     gap_evidence: str
     notes: str
@@ -76,8 +82,8 @@ def ingest_controls(
     """Embed controls and return a Chroma vector store.
 
     If store_path is None the store is ephemeral (in-memory) — suitable for tests
-    and one-shot agent runs. If store_path is given, the directory is wiped and
-    recreated so the call is always idempotent.
+    and one-shot agent runs. If store_path is given, its contents are cleared so
+    the call is always idempotent.
 
     embeddings defaults to init_embeddings() when not provided.
     Returns the langchain_chroma.Chroma instance.
@@ -103,9 +109,21 @@ def ingest_controls(
         "collection_name": "controls",
     }
     if store_path is not None:
-        # Wipe the old store so repeated ingest is idempotent.
+        # Wipe the old store so repeated ingest is idempotent. Clear contents
+        # rather than removing store_path itself (rmtree + recreate) — when
+        # store_path is a mount point (a Docker named volume or bind mount),
+        # the kernel refuses to rmdir it while something is mounted there
+        # (EBUSY), regardless of permissions. Clearing contents in place never
+        # touches the mount point itself, so it works for a plain directory,
+        # a bind mount, or a named volume alike.
         if store_path.exists():
-            shutil.rmtree(store_path)
+            for child in store_path.iterdir():
+                if child.is_dir() and not child.is_symlink():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+        else:
+            store_path.mkdir(parents=True)
         kwargs["persist_directory"] = str(store_path)
 
     return Chroma.from_documents(**kwargs)

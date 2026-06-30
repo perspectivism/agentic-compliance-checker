@@ -53,9 +53,9 @@ The project is done when all items below are true.
 
 ## Packaging / Docker
 
-- [ ] `docker compose build` succeeds.
+- [ ] `make build` succeeds.
 - [ ] `make test` (fast lane) passes in the container.
-- [ ] `docker compose run --rm app assess --repo-url <url>` runs end-to-end.
+- [ ] `make assess REPO=<url>` runs end-to-end.
 - [ ] Image runs as non-root.
 - [ ] `.env.example` documents required keys; `.env` is gitignored.
 - [ ] KB and reports persist via volumes (not baked into the image).

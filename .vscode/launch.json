@@ -6,16 +6,50 @@
       "type": "debugpy",
       "request": "launch",
       "module": "pytest",
-      "args": ["${file}", "-q"],
+      "args": ["${file}", "-m", "not agent", "-q"],
+      "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "justMyCode": false
     },
     {
-      "name": "Debug CLI",
+      "name": "assess: explicit (AC-6, SC-8)",
       "type": "debugpy",
       "request": "launch",
       "module": "agentic_compliance.cli",
-      "args": ["--help"],
+      "args": [
+        "assess",
+        "--repo-path", "${workspaceFolder}/tests/fixtures/repos/secure_terraform_app",
+        "--controls", "AC-6,SC-8",
+        "--out", "${workspaceFolder}/artifacts/debug_explicit.json"
+      ],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "assess: dynamic (top-k from Chroma)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "agentic_compliance.cli",
+      "args": [
+        "assess",
+        "--repo-path", "${workspaceFolder}/tests/fixtures/repos/secure_terraform_app",
+        "--out", "${workspaceFolder}/artifacts/debug_dynamic.json"
+      ],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "ingest-controls",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "agentic_compliance.cli",
+      "args": ["ingest-controls"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
       "console": "integratedTerminal",
       "justMyCode": false
     }

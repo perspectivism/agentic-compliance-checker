@@ -26,12 +26,15 @@ from typing import Annotated, Any, TypedDict, cast
 from langchain.chat_models import init_chat_model
 from langgraph.graph import END, START, StateGraph
 
+from .control_selection import explicit_selection, select_controls
 from .evidence_collector import collect_evidence
-from .kb import ControlEntry, load_controls
+from .kb import ControlEntry
+from .retriever import ControlsRetriever
 from .schemas import (
     CollectionResult,
     ControlVerdict,
     FinalReport,
+    SelectionResult,
     SynthesizerOutput,
     VerdictClass,
     VerifierDecision,
@@ -62,18 +65,48 @@ GRAPH_RECURSION_LIMIT: int = 200
 
 _SYNTHESIZER_SYSTEM = (
     "You are a compliance synthesizer. Given evidence from automated scanners, "
-    "produce a structured verdict. Only emit 'satisfied' when evidence explicitly "
-    "confirms the control. Emit 'gap' when findings show a control failure. "
-    "Emit 'not_assessable' when evidence is insufficient or tool errors occurred. "
-    "Base reasoning strictly on the provided evidence — do not invent claims."
+    "produce a structured verdict, scoped strictly to what the scanners actually checked — "
+    "not the control's full theoretical scope. Emit 'satisfied' when at least one concrete "
+    "scanner evidence item directly confirms the control for the resource(s) it covers; you "
+    "do not need evidence for every resource type the control could theoretically apply to "
+    "(e.g. one correctly-configured S3 bucket is sufficient evidence even if the repo also "
+    "has RDS/EBS resources with no evidence either way — unless there is contradictory gap "
+    "evidence or a tool error for those resources, which still forces 'gap' or "
+    "'not_assessable' respectively). 'Positive evidence' and 'gap "
+    "evidence' below list illustrative example categories, not a required checklist — one "
+    "matching category is enough, you do not need all of them. Emit 'gap' when findings show "
+    "a control failure. Emit 'not_assessable' when evidence is insufficient or tool errors "
+    "occurred. Base reasoning strictly on the provided evidence — do not invent claims."
 )
 
 _VERIFIER_SYSTEM = (
     "You are a compliance verifier. Review the draft verdict against the collected evidence. "
     "Reject any verdict whose rationale goes beyond or contradicts the provided scanner evidence. "
     "Reject 'satisfied' or 'partial' verdicts that lack concrete supporting evidence. "
-    "Approve otherwise."
+    "Do not reject a 'satisfied' verdict merely because the evidence does not cover every "
+    "example category listed for the control, or every resource type the control could "
+    "theoretically apply to — one concrete, on-point evidence item for the resource(s) "
+    "actually present is sufficient. Approve otherwise."
 )
+
+
+def _require_chat_model() -> str:
+    """Return CHAT_MODEL or raise a clear, actionable error.
+
+    The CLI pre-checks this before any clone/embedding work for a fast, friendly
+    failure, but the graph is also callable directly (tests, langgraph dev,
+    programmatic use) — those callers bypass the CLI check entirely, so this is
+    the real backstop. A bare os.environ["CHAT_MODEL"] KeyError here would be
+    opaque to anyone not already familiar with this module's internals.
+    """
+    model_id = os.environ.get("CHAT_MODEL")
+    if not model_id:
+        raise RuntimeError(
+            "CHAT_MODEL is not set. Copy .env.example to .env and fill in CHAT_MODEL "
+            "plus the matching provider API key (e.g. ANTHROPIC_API_KEY), or export "
+            "CHAT_MODEL directly in your environment."
+        )
+    return model_id
 
 
 # ── State ──────────────────────────────────────────────────────────────────────
@@ -94,6 +127,7 @@ class ComplianceState(TypedDict):
     verifier_attempts: int  # how many times verify has run for the current control
     verifier_notes: list[str]  # rejection notes accumulated from the verifier (cleared per control)
     verdicts: Annotated[list[dict], operator.add]  # finalized ControlVerdict dicts, one per control
+    selection: dict  # SelectionResult.model_dump(); how controls were chosen for this run
     run_id: str
     started_at: str
     model_id: str
@@ -173,12 +207,12 @@ def _build_graph(synthesizer: Any = None, verifier: Any = None):
     def _get_synthesizer():
         if synthesizer is not None:
             return synthesizer
-        return init_chat_model(os.environ["CHAT_MODEL"]).with_structured_output(SynthesizerOutput)
+        return init_chat_model(_require_chat_model()).with_structured_output(SynthesizerOutput)
 
     def _get_verifier():
         if verifier is not None:
             return verifier
-        return init_chat_model(os.environ["CHAT_MODEL"]).with_structured_output(VerifierDecision)
+        return init_chat_model(_require_chat_model()).with_structured_output(VerifierDecision)
 
     # ── Nodes ──────────────────────────────────────────────────────────────────
 
@@ -308,9 +342,11 @@ def _build_graph(synthesizer: Any = None, verifier: Any = None):
     def final_node(state: ComplianceState) -> dict:
         """Compile all finalized verdicts into a FinalReport with audit metadata."""
         verdicts = [ControlVerdict.model_validate(v) for v in state["verdicts"]]
+        selection = SelectionResult.model_validate(state["selection"])
         report = FinalReport(
             repo_path=state["repo_root"],
             verdicts=verdicts,
+            selection=selection,
             audit={
                 "run_id": state["run_id"],
                 "started_at": state["started_at"],
@@ -377,8 +413,16 @@ def _initial_state(
     repo_root: Path,
     controls: list[ControlEntry],
     model_id: str = "unset",
+    selection: SelectionResult | None = None,
 ) -> ComplianceState:
-    """Build the initial ComplianceState for a fresh run."""
+    """Build the initial ComplianceState for a fresh run.
+
+    selection defaults to an explicit SelectionResult wrapping controls so tests
+    can call _initial_state() directly without constructing one. run_assessment()
+    always provides the proper SelectionResult (dynamic or explicit).
+    """
+    if selection is None:
+        selection = explicit_selection(controls)
     return ComplianceState(
         repo_root=str(repo_root.resolve()),
         controls=[c.model_dump() for c in controls],
@@ -388,6 +432,7 @@ def _initial_state(
         verifier_attempts=0,
         verifier_notes=[],
         verdicts=[],
+        selection=selection.model_dump(),
         run_id=str(uuid.uuid4()),
         started_at=datetime.now(UTC).isoformat(),
         model_id=model_id,
@@ -400,16 +445,33 @@ def run_assessment(
     controls: list[ControlEntry] | None = None,
     synthesizer: Any = None,
     verifier: Any = None,
+    top_k_controls: int = 6,
+    store_path: Path | None = None,
 ) -> FinalReport:
     """Assess repo_root against controls and return a FinalReport.
 
-    controls defaults to all controls in data/controls.yaml.
+    If controls is None (the default), selects controls dynamically from the
+    persisted KB via semantic search over detected repo features. Missing KB
+    raises FileNotFoundError — no silent fallback to all controls.
+
+    If controls is provided, wraps them in an explicit SelectionResult and
+    bypasses the retriever entirely.
+
     synthesizer and verifier can be injected for testing (pre-structured models).
+    top_k_controls is the maximum number of controls to select in dynamic mode.
+    store_path defaults to ./chroma_db (the ingest-controls default output).
     """
     if controls is None:
-        controls = load_controls()
+        _store_path = store_path or Path("./chroma_db")
+        retriever = ControlsRetriever.from_persisted(_store_path)
+        selection = select_controls(repo_root, retriever, top_k=top_k_controls)
+        # Entries are already in retriever._index — no second YAML read needed.
+        controls = retriever.get_by_ids([sc.control_id for sc in selection.selected_controls])
+    else:
+        selection = explicit_selection(controls)
+
     model_id = os.environ.get("CHAT_MODEL", "unset")
-    state = _initial_state(repo_root, controls, model_id=model_id)
+    state = _initial_state(repo_root, controls, model_id=model_id, selection=selection)
     compiled = _build_graph(synthesizer=synthesizer, verifier=verifier)
     result = compiled.invoke(state, config={"recursion_limit": GRAPH_RECURSION_LIMIT})
     return FinalReport.model_validate(result["final_report"])

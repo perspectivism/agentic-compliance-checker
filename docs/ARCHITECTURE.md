@@ -21,9 +21,12 @@ flowchart TD
     CLI -->|validate + prepare target| LOADER[Safe Repo Loader<br/>validate · bound · no execution]
     LOADER -->|produces| REPO[(target repo<br/>untrusted · never executed)]
 
-    CLI -->|run assessment| SUPERVISOR
+    CLI -->|run assessment| SELECTION[Control Selection<br/>detect features · semantic query · top-k]
+    CHROMA[(Chroma<br/>vectors · embed_text · IDs)] -->|rank by relevance| SELECTION
+    YAML[(controls.yaml<br/>full rubric · trusted)] -->|load selected entries| SELECTION
+    SELECTION -->|"selected controls + rubric in state"| SUPERVISOR
 
-    subgraph GRAPH [assessment graph · controls in state]
+    subgraph GRAPH [assessment graph]
         SUPERVISOR[Supervisor<br/>routing · control_idx · stop condition]
 
         SUPERVISOR -->|collect evidence| COLLECTOR[Evidence Collector<br/>deterministic MCP tools]
@@ -39,7 +42,6 @@ flowchart TD
 
     SUPERVISOR -->|all controls assessed| FINAL([FinalReport + audit log])
 
-    KB[(controls KB<br/>trusted)] -->|"loaded before graph starts"| SUPERVISOR
     MCP -->|read-only| REPO
 ```
 
@@ -63,9 +65,15 @@ stateDiagram-v2
 ```
 
 `FinalizeControl` commits the verdict, downgrading to `not_assessable` if the verifier
-loop was exhausted. Control context (positive/gap evidence, scanner hints) is pre-loaded
-into graph state from `data/controls.yaml`; semantic retrieval via `ControlsRetriever`
-can be wired in as an additional node in a later pass.
+loop was exhausted. Before the graph starts, `run_assessment()` runs **Control Selection**:
+it detects repo technology features from the file tree (file extensions and names),
+plus a bounded content read of `.tf` files to identify Terraform resource types
+(e.g. `aws_lb_listener`, `aws_s3_bucket_public_access_block`) for finer-grained query
+terms, builds a semantic query, and retrieves the most relevant controls from the
+persisted Chroma KB. The selected controls
+and their full rubric context (positive/gap evidence, scanner hints) are loaded into the
+initial `ComplianceState` as `controls: list[dict]`. Passing `--controls AC-6,SC-8`
+bypasses the retriever and wraps the explicit list instead.
 
 Required conditional behavior:
 - Verifier **passes** → `FinalizeControl` commits the verdict, Supervisor advances.
@@ -95,14 +103,37 @@ before the Synthesizer reasons over them. Recommended transport for local v1 is 
 
 ## RAG store
 
-Small, versioned controls KB. **Chroma** with a persist directory is the default
-(local, survives restarts); FAISS or an in-memory store is fine for tests. Each KB
-entry carries: control ID, family, plain-English requirement, expected positive
-evidence, negative evidence, not-assessable notes, and scanner hints.
+The controls KB has two layers with distinct roles and distinct lifecycles:
 
-Retrieval is **hybrid**: semantic over the control text, deterministic/structured over
-the repo (regex/AST via MCP tools). Embedding Terraform and hoping is *not* how repo
-evidence is found — see [`docs/DECISIONS.md`](DECISIONS.md) D2.
+**`data/controls.yaml`** — the human-authored source of truth. Contains the project
+control ID, canonical NIST SP 800-53 Rev. 5 references (`nist_refs`), plain-English
+requirement, expected positive/negative evidence, not-assessable notes, and scanner
+hints. Read on every `assess` run into an in-memory index; the full
+`ControlEntry` objects it produces are what the graph reasons over. Never written by the
+tool — edited by hand, diffed in PRs.
+
+**Chroma** (persisted, rebuilt by `ingest-controls`) — stores embedding vectors,
+the retrieval text (`embed_text`, a compact summary of the control), and
+`{control_id, name}` metadata. The full rubric content — evidence expectations, scanner
+hints, not-assessable notes — stays in the YAML; Chroma holds only what is needed for
+semantic ranking. Chroma's sole job is **ranking**: during pre-graph control selection,
+`ControlsRetriever.search_with_scores()` queries Chroma with a semantic query built from
+detected repo features and returns a ranked list of control IDs.
+
+After selection, `retriever.get_by_ids()` pulls the full `ControlEntry` objects from
+the in-memory YAML index — **no second Chroma lookup**. The graph only ever sees
+content that came from the YAML. Tests inject an in-memory Chroma store with
+deterministic fake embeddings; no FAISS, no network.
+
+**When each is used:**
+- `ingest-controls`: reads YAML → generates embeddings → writes vectors to Chroma
+- `assess --controls AC-6,SC-8` (explicit): reads YAML only — Chroma never opened
+- `assess` (dynamic, default): opens Chroma → ranks top-k control IDs → fetches full entries from YAML index
+- `assess` (in-graph, both paths): Synthesizer and Verifier receive only YAML-sourced `ControlEntry` content
+
+Retrieval is **hybrid**: semantic over the control text (Chroma, for selection), deterministic/structured over the repo (regex/AST via MCP tools, for evidence). Embedding
+Terraform files and hoping for a match is *not* how repo evidence is found — see
+[`docs/DECISIONS.md`](DECISIONS.md) D2.
 
 **Embeddings are a separate model type from the chat model.** The chat model is freely
 swappable (LangChain `init_chat_model`), but switching chat providers doesn't supply an

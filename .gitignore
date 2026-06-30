@@ -35,6 +35,7 @@ traces/
 # Private build tooling
 .ai/
 .agents/
+.claude/
 
 # Editor / OS
 .idea/

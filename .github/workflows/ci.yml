@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:  # allows triggering a run manually from the GitHub Actions UI
 
 jobs:
   test:
@@ -18,10 +19,16 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install (core + dev)
+      # Fast-lane tests import agentic_compliance.graph (and other modules that need
+      # langchain/langgraph/chromadb at module import time, not just inside agent-marked
+      # tests) — pytest has to import a test module before it can filter by marker, so
+      # `-m "not agent"` can't skip a collection-time ImportError. [dev] alone leaves
+      # this uninstalled and aborts the whole run before any test executes; [agent] is
+      # required here even though no fast-lane test makes a real model/network call.
+      - name: Install (core + dev + agent)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -e ".[dev,agent]"
 
       # Lint + format gate: ruff is the single linter/formatter. format --check fails the
       # build on unformatted code (the editor's format-on-save isn't enough for agents/CI).
@@ -31,8 +38,9 @@ jobs:
           ruff format --check src tests scripts
 
       # Fast lane: deterministic tests (loader, MCP tools, scanners, graph routing
-      # with mocked LLMs). Agent-stack tests are marked `agent` and run separately,
-      # since they need model/network access and API keys.
+      # with mocked LLMs). Agent-stack tests are marked `agent` and run separately
+      # because they may need heavier runtime deps, real embeddings, model/network
+      # access, or API keys.
       - name: Tests (fast lane)
         run: pytest -m "not agent" -q
 

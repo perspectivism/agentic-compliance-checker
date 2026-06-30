@@ -34,7 +34,7 @@ in each acceptance gate below.
 
 ### Acceptance gate
 ```bash
-.venv/bin/python -m pytest tests/test_repo_loader.py
+make test-local
 ```
 
 Pass condition:
@@ -65,7 +65,7 @@ Pass condition:
 
 ### Acceptance gate
 ```bash
-.venv/bin/python -m pytest tests/test_mcp_tools.py
+make test-all-local  # test-local would skip this file's @pytest.mark.agent checks
 ```
 
 Pass condition:
@@ -87,12 +87,12 @@ Pass condition:
 ### Unit tests
 - Control ID lookup returns exact control.
 - Query for TLS returns SC-8.
-- Query for secrets returns IA-5/SI secrets handling.
+- Query for secrets returns IA-5 secrets handling.
 - Retriever returns stable top-k for fixtures.
 
 ### Acceptance gate
 ```bash
-.venv/bin/python -m pytest tests/test_controls_retriever.py
+make test-all-local  # test-local would skip this file's @pytest.mark.agent checks
 ```
 
 Pass condition:
@@ -122,7 +122,7 @@ Pass condition:
 
 ### Acceptance gate
 ```bash
-.venv/bin/python -m pytest tests/test_evidence_node.py
+make test-local
 ```
 
 Pass condition:
@@ -154,16 +154,55 @@ Pass condition:
 
 ### Acceptance gate
 ```bash
-.venv/bin/python -m pytest tests/test_graph.py
+make test-local
 # langgraph dev requires the studio extras (pip install -e ".[dev,agent,studio]"):
 # langgraph.json must use module path "agentic_compliance.graph:graph" (not file path)
-.venv/bin/langgraph dev      # Studio renders the supervisor + verifier-loop topology
+.venv/bin/langgraph dev  # Studio renders the supervisor + verifier-loop topology
 ```
 
 Pass condition:
 - graph cannot loop forever.
 - unsupported claims are not silently accepted.
 - Studio renders the graph (capture a screenshot for the README).
+
+---
+
+## M5.5 — Semantic control selection
+
+### Build
+- `control_selection.py`: `detect_features`, `build_selection_query`, `select_controls`, `explicit_selection`.
+- `SelectedControl` and `SelectionResult` schemas in `schemas.py`.
+- `ControlsRetriever.from_persisted(store_path)` — loads a persisted Chroma store without re-ingesting; raises `FileNotFoundError` with a clear "run ingest-controls first" message when missing.
+- `ControlsRetriever.search_with_scores(query, k)` — returns `list[tuple[ControlEntry, float]]` with normalized relevance scores (0–1, higher=better).
+- `run_assessment(controls=None)` uses dynamic selection from the persisted KB via `select_controls`.
+- `run_assessment(controls=[...])` uses explicit selection — bypasses retriever loading entirely.
+- CLI `--top-k-controls K` (default 6) for dynamic mode; rejected with a clear error when combined with `--controls`.
+- Missing persisted KB with `controls=None` raises `FileNotFoundError` — no silent fallback to all controls.
+- `FinalReport.selection: SelectionResult` as a typed first-class field (not buried in `audit`).
+
+### Unit tests
+- Feature detection finds Terraform (`.tf`), Dockerfile, GitHub Actions (`.github/workflows/`), Python files.
+- Terraform resource-type sub-feature detection (bounded `.tf` content read) finds `aws_lb_listener`, `aws_s3_bucket`/`aws_s3_bucket_public_access_block`, `aws_iam_policy`, `aws_cloudtrail` and injects resource-specific query terms (TLS/HTTPS, S3/SSE, IAM, CloudTrail).
+- Empty repo detects no features.
+- Query construction from features produces a non-empty string; empty features returns the fallback query.
+- Dynamic selection returns controls in ranking order with normalized relevance scores.
+- `top_k` parameter is respected (at most k results returned).
+- Relevance scores are in [0, 1] with higher = more relevant.
+- Explicit selection produces `mode="explicit"` with no relevance scores (`None`).
+- CLI rejects `--controls` combined with `--top-k-controls`.
+- `FinalReport.selection` from a graph run matches the assessed controls.
+
+### Acceptance gate
+
+```bash
+make lint-local
+make test-all-local  # test-local would skip the real-embedding AC-6 selection regression
+```
+
+Pass condition:
+- RAG control selection is on the `assess` path by default.
+- Missing KB fails clearly — no silent fallback to all controls.
+- Fast lane remains deterministic and credential-free (fake vector store in tests).
 
 ---
 
@@ -195,8 +234,7 @@ evaluation (M7) consumes. See `docs/TEST_PLAN.md` → "Test cadence".
 
 ### Acceptance gate
 ```bash
-.venv/bin/python -m pytest tests/test_golden_set.py        # deterministic, every check-in
-# manual, occasional:
+make test-local
 .venv/bin/python scripts/generate_golden.py --dry-run
 ```
 
@@ -229,8 +267,8 @@ in the fast lane.
 
 ### Acceptance gate
 ```bash
-.venv/bin/python -m pytest tests/test_eval.py              # schema/loader portion in fast lane
-.venv/bin/python scripts/run_eval.py             # full run needs the agent stack + keys
+make test-local  # schema/loader portion in fast lane
+make eval-local  # full run needs the agent stack + keys
 ```
 
 Pass condition:
@@ -257,7 +295,7 @@ Pass condition:
 
 ### Acceptance gate
 ```bash
-.venv/bin/python -m pytest tests/test_observability.py
+make test-local
 ```
 
 Pass condition:
@@ -268,10 +306,10 @@ Pass condition:
 ## Final release gate
 
 ```bash
-.venv/bin/python -m pytest
-.venv/bin/python scripts/run_eval.py
-docker compose build
-docker compose run --rm app assess --repo-url https://github.com/OWNER/REPO
+make test-all-local
+make eval-local
+make build
+make assess REPO=https://github.com/OWNER/REPO
 ```
 
 Manual checks:

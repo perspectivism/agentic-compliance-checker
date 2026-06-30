@@ -7,15 +7,16 @@ explicit orchestration, tools, grounded verification, evaluation, and observabil
 rather than prompt engineering.
 
 Point it at a public GitHub URL (shallow clone, read-only) or a local path; it
-never executes repo content, pre-loads a rubric of controls from the knowledge base,
-runs deterministic evidence scans against the repo, drafts a verdict per control, and
-a **verifier loop** rejects any verdict that isn't backed by concrete scanner evidence
-— re-synthesizing with the verifier's notes until the claim is grounded or a cap is hit.
+never executes repo content, detects repo technology features and selects the most
+relevant controls via semantic search over the knowledge base, runs deterministic
+evidence scans against the repo, drafts a verdict per control, and a **verifier loop**
+rejects any verdict that isn't backed by concrete scanner evidence — re-synthesizing
+with the verifier's notes until the claim is grounded or a cap is hit.
 
 ## What it does
 Multi-agent orchestration on LangGraph · typed state and explicit control flow · a
 conditional verifier self-correction loop · a self-built MCP server for structured
-repo analysis · a controls KB with semantic retriever (pre-loaded at assess time for the v1 rubric; dynamic control selection planned) · deterministic MCP tools over the repo ·
+repo analysis · a controls KB with semantic retriever — dynamic control selection detects repo technology features and retrieves the most relevant controls before assessment · deterministic MCP tools over the repo ·
 evidence-backed verdicts · a two-layer evaluation harness (grounding + verdict
 accuracy) · unit tests and milestone gates · observability · and secure-by-default,
 fail-closed ingestion of untrusted repositories.
@@ -29,9 +30,12 @@ flowchart TD
     CLI -->|validate + prepare target| LOADER[Safe Repo Loader<br/>validate · bound · no execution]
     LOADER -->|produces| REPO[(target repo<br/>untrusted · never executed)]
 
-    CLI -->|run assessment| SUPERVISOR
+    CLI -->|run assessment| SELECTION[Control Selection<br/>detect features · semantic query · top-k]
+    CHROMA[(Chroma<br/>vectors · embed_text · IDs)] -->|rank by relevance| SELECTION
+    YAML[(controls.yaml<br/>full rubric · trusted)] -->|load selected entries| SELECTION
+    SELECTION -->|"selected controls + rubric in state"| SUPERVISOR
 
-    subgraph GRAPH [assessment graph · controls in state]
+    subgraph GRAPH [assessment graph]
         SUPERVISOR[Supervisor<br/>routing · control_idx · stop]
 
         SUPERVISOR -->|collect evidence| COLLECTOR[Evidence Collector<br/>deterministic MCP tools]
@@ -47,7 +51,6 @@ flowchart TD
 
     SUPERVISOR -->|all controls assessed| FINAL([FinalReport + audit log])
 
-    KB[(controls KB<br/>trusted)] -->|"loaded before graph starts"| SUPERVISOR
     MCP -->|read-only| REPO
 ```
 
@@ -57,39 +60,84 @@ Detailed component diagram and the deterministic-vs-LLM split: [`docs/ARCHITECTU
 
 ## How it works
 
-**Two data sources, two trust levels.** The controls knowledge base (Chroma by default) holds a rubric of NIST 800-53-inspired controls with definitions, evidence expectations, and pass/fail thresholds. It is trusted, static, and ingested once (`make ingest`). The target repository is untrusted and is never embedded into the vector store; it is inspected read-only through deterministic MCP tools.
+**Two data sources, two trust levels.** The controls knowledge base is trusted and static — ingested once (`make ingest`). It has two layers: `data/controls.yaml` holds the structured rubric (definitions, evidence expectations, scanner hints) that the graph reasons over; Chroma holds embedding vectors used to semantically rank and select the most relevant controls before assessment starts. The target repository is untrusted and is never embedded into the vector store; it is inspected read-only through deterministic MCP tools.
 
-**Per-control flow.** The Supervisor routes each control through three nodes in sequence:
+**Control selection (pre-graph).** Before the graph starts, `run_assessment()` detects repo technology features from the file tree (Terraform, Dockerfile, GitHub Actions, Python, etc.), plus a bounded read of `.tf` file contents to identify specific Terraform resource types (load balancers, S3 buckets, IAM policies, CloudTrail) for sharper query terms, builds a semantic query from those features, and retrieves the top-k most relevant controls from the persisted Chroma KB. The selected controls — and their full rubric context — enter the graph as the initial `controls` state. Passing `--controls AC-6,SC-8` skips retrieval and uses that explicit list instead.
 
-1. **Evidence Collector** (deterministic MCP tools) — runs structured, read-only scanners against the repo: credential patterns, IaC misconfigurations, CI workflow gaps. Evidence facts come from tool outputs, not LLM inference. Control rubric context is pre-loaded into graph state before the graph starts (from `data/controls.yaml`), so no per-control retrieval step is needed in the graph.
+**Per-control flow.** The Supervisor routes each selected control through three nodes in sequence:
+
+1. **Evidence Collector** (deterministic MCP tools) — runs structured, read-only scanners against the repo: credential patterns, IaC misconfigurations, CI workflow gaps. Evidence facts come from tool outputs, not LLM inference.
 2. **Synthesizer** (LLM) — takes control rubric context and evidence refs from the tools and produces a structured `ControlVerdict`: verdict class, rationale, confidence, and file/line citations.
 3. **Verifier** (LLM) — checks whether the cited evidence actually supports the verdict. It operates only on what the Synthesizer provided; it makes no new tool calls.
 
 **Verifier loop exit conditions.** If the verifier passes, the verdict moves to `FinalizeControl`. If it fails and attempts remain, the graph routes back to re-synthesize (evidence was already collected; the Synthesizer gets the verifier's rejection notes in its next prompt). If the cap is reached, the verdict is **downgraded** — `verifier_status: "failed"` with notes explaining why the claim was unsupported. There is also a **deterministic fail-closed guard**: any verifier-approved affirmative verdict (`satisfied`, `partial`, `gap`) is downgraded to `not_assessable` if scanner evidence is empty or collection errors occurred — this is enforced in code, not just in a prompt.
 
-## Quickstart (Docker)
+## Quickstart
+
+Run `make` or `make help` at any time to print the available local and Docker workflows.
 
 ```bash
-cp .env.example .env        # set CHAT_MODEL + the matching provider key (embeddings default to local)
-
-make build                  # build the image
-make test                   # fast test suite (-m "not agent")
-make ingest                 # build the controls knowledge base
-make assess REPO=https://github.com/OWNER/REPO  # assess a public repo
-make eval                   # run the evaluation harness  [M7+]
+cp .env.example .env  # set CHAT_MODEL + the matching provider key (embeddings default to local)
 ```
 
-Or with Compose directly:
+### Local (venv)
 
 ```bash
-docker compose build
-docker compose run --rm app assess --repo-url https://github.com/OWNER/REPO
-docker compose run --rm test
+make venv  # create .venv, install dev deps (Python 3.12+)
+make install-agent  # add the agent stack (MCP, LangGraph, RAG)
+make test-local  # fast test suite (-m "not agent")
+```
+
+Try it against a bundled fixture repo, or a public URL — no Docker needed either way.
+The examples below show dynamic selection, explicit control selection, and
+URL-based local assessment; each run writes a report to `artifacts/local_report.json`
+(see "Reports and artifacts" below):
+
+```bash
+make ingest-local  # build the controls knowledge base
+make assess-local  # dynamic control selection, bundled fixture
+make assess-local CONTROLS=AC-6,SC-8 REPO_PATH=tests/fixtures/repos/insecure_terraform_app  # explicit controls, different fixture
+make assess-local REPO=https://github.com/OWNER/REPO  # public repo instead of a fixture (REPO takes precedence over REPO_PATH)
+```
+
+### Docker
+
+`make assess` is shown twice below — dynamic (default, semantic top-k) vs. explicit
+`--controls` selection. Either way the report is written inside Docker's `artifacts`
+volume, not the host — see "Reports and artifacts" below.
+
+```bash
+make build  # build the image
+make test  # fast test suite (-m "not agent")
+make ingest  # build the controls knowledge base
+make assess REPO=https://github.com/OWNER/REPO  # dynamic control selection
+make assess REPO=https://github.com/OWNER/REPO CONTROLS=AC-6,SC-8  # explicit control selection
+make eval  # run the evaluation harness  [M7+]
+make export-artifacts  # copy the Docker report(s) to ./artifacts/docker/ on the host
 ```
 
 The image runs as non-root and spawns the MCP server as an in-container stdio
 subprocess (no separate service). Subcommands print an honest "implemented at Mx"
 message until that milestone lands, so the container is runnable from day one.
+
+### Reports and artifacts
+
+Local CLI runs write reports directly under `artifacts/`. The fixture helper
+`make assess-local` defaults to `artifacts/local_report.json` — a separate path
+from the CLI's own `artifacts/report.json` default — so a quick fixture run never
+silently overwrites a real local assessment.
+
+Docker runs write reports inside Docker's named `artifacts` volume; they don't
+appear on the host until exported. `make export-artifacts` copies them to
+`artifacts/docker/` by default, keeping Docker-origin reports separate from
+local ones.
+
+| Command | Report path |
+|---|---|
+| `make assess-local` | `artifacts/local_report.json` |
+| direct local CLI (`assess --repo-url/--repo-path ...`) | `artifacts/report.json` |
+| `make assess ...` (Docker) | `/app/artifacts/report.json`, inside the volume |
+| `make export-artifacts` | `artifacts/docker/` |
 
 ## Develop (langgraph dev)
 
@@ -116,13 +164,16 @@ State is in-memory and resets on restart — that's expected for dev.
   the chosen interface is a CLI + report (see `docs/DECISIONS.md` D11), not a server.
 
 ## Why this isn't just RAG
-A RAG app retrieves documents and writes an answer. Here, RAG is used only for the
-controls KB — to answer "what does this control require?" The target repo is never
-embedded or retrieved; it is inspected by deterministic, read-only MCP tools that
-return structured evidence with file paths and line numbers. The LLM reasons over
-those two bounded inputs, it does not freely browse the repo. On top of that: explicit
-graph orchestration, typed tools, structured state, **a verifier loop that rejects
-unsupported claims**, metrics, and milestone-gated tests.
+A RAG app retrieves documents and writes an answer. Here, semantic retrieval has one
+specific role: **control selection** — detecting repo technology features and ranking
+which controls are most relevant via Chroma similarity search. Once controls are selected,
+their full rubric context (evidence expectations, scanner hints) is loaded deterministically
+from the trusted YAML rubric, not retrieved by embedding. The target repo is never embedded
+or retrieved; it is inspected by deterministic, read-only MCP tools that return structured
+evidence with file paths and line numbers. The LLM reasons over those two bounded inputs,
+it does not freely browse the repo. On top of that: explicit graph orchestration, typed
+tools, structured state, **a verifier loop that rejects unsupported claims**, metrics, and
+milestone-gated tests.
 
 ## Build order
 Milestone-gated M1→M8 — see [`docs/MILESTONES.md`](docs/MILESTONES.md). Do not advance

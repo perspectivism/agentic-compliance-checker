@@ -177,6 +177,38 @@ def scan_secrets(repo_root: Path) -> list[ToolFinding]:
 # ── IaC scanner (internally split by check family) ─────────────────────────────
 
 
+def _extract_resource_blocks(lines: list[str], resource_type: str) -> list[tuple[int, list[str]]]:
+    """Extract all resource blocks of the given type from Terraform source lines.
+
+    Returns (1-indexed start line, list of lines in the block) for each match.
+    Uses brace-depth tracking so nested blocks are included correctly.
+    """
+    blocks: list[tuple[int, list[str]]] = []
+    resource_re = re.compile(rf'resource\s+"{re.escape(resource_type)}"')
+    i = 0
+    while i < len(lines):
+        if resource_re.search(lines[i]):
+            start = i + 1  # convert to 1-indexed
+            depth = 0
+            block_lines: list[str] = []
+            j = i
+            while j < len(lines):
+                for ch in lines[j]:
+                    if ch == "{":
+                        depth += 1
+                    elif ch == "}":
+                        depth -= 1
+                block_lines.append(lines[j])
+                j += 1
+                if depth == 0 and block_lines:
+                    break
+            blocks.append((start, block_lines))
+            i = j
+        else:
+            i += 1
+    return blocks
+
+
 def _scan_terraform(repo_root: Path, files: list[RepoFile]) -> list[ToolFinding]:
     """Check Terraform .tf files for security misconfigurations."""
     findings: list[ToolFinding] = []
@@ -211,33 +243,97 @@ def _scan_terraform(repo_root: Path, files: list[RepoFile]) -> list[ToolFinding]
                     )
                 )
 
-        # Plain HTTP listener: load balancer listener with no TLS termination
-        for i, line in enumerate(lines, start=1):
-            if re.match(r'\s*protocol\s*=\s*"HTTP"', line, re.IGNORECASE):
+        # SC-8: Load balancer listener protocol — block-aware.
+        # An HTTP listener whose default_action is an HTTPS redirect is positive evidence,
+        # not a gap. We must inspect the full block to distinguish the two cases.
+        for block_start, block_lines in _extract_resource_blocks(lines, "aws_lb_listener"):
+            block_text = "\n".join(block_lines)
+            # Determine the listener's own protocol from the FIRST protocol line in the block.
+            first_proto = None
+            first_proto_lineno = block_start
+            for j, ln in enumerate(block_lines):
+                if re.search(r'protocol\s*=\s*"HTTPS"', ln, re.IGNORECASE):
+                    first_proto = "HTTPS"
+                    first_proto_lineno = block_start + j
+                    break
+                if re.search(r'protocol\s*=\s*"HTTP"', ln, re.IGNORECASE):
+                    first_proto = "HTTP"
+                    first_proto_lineno = block_start + j
+                    break
+
+            if first_proto == "HTTPS":
+                ssl_match = re.search(r'ssl_policy\s*=\s*"([^"]+)"', block_text, re.IGNORECASE)
+                ssl_note = f" ({ssl_match.group(1)})" if ssl_match else ""
                 findings.append(
                     ToolFinding(
                         path=rel,
-                        start_line=i,
-                        end_line=i,
-                        finding_type="plain_http_listener",
+                        start_line=block_start,
+                        end_line=block_start + len(block_lines) - 1,
+                        finding_type="https_listener",
                         check_family="terraform",
-                        severity="high",
-                        message="Load balancer listener uses plain HTTP — no TLS termination",
+                        severity="info",
+                        message=f"Load balancer listener uses HTTPS/TLS{ssl_note}",
                         control_hints=["SC-8"],
-                        excerpt=line.strip(),
+                        excerpt='protocol = "HTTPS"'
+                        + (f', ssl_policy = "{ssl_match.group(1)}"' if ssl_match else ""),
                         redacted=False,
-                        limitations=[
-                            "Cannot determine if an HTTP→HTTPS redirect rule is configured elsewhere"
-                        ],
+                        limitations=[],
                     )
                 )
+            elif first_proto == "HTTP":
+                # Redirect to HTTPS inside the same block is positive evidence, not a gap.
+                has_redirect = bool(re.search(r'type\s*=\s*"redirect"', block_text, re.IGNORECASE))
+                redirect_to_https = bool(
+                    re.search(r'protocol\s*=\s*"HTTPS"', block_text, re.IGNORECASE)
+                )
+                if has_redirect and redirect_to_https:
+                    findings.append(
+                        ToolFinding(
+                            path=rel,
+                            start_line=first_proto_lineno,
+                            end_line=first_proto_lineno,
+                            finding_type="http_to_https_redirect",
+                            check_family="terraform",
+                            severity="info",
+                            message="HTTP listener redirects to HTTPS — transmission protected",
+                            control_hints=["SC-8"],
+                            excerpt='protocol = "HTTP", default_action type = "redirect" → HTTPS',
+                            redacted=False,
+                            limitations=[],
+                        )
+                    )
+                else:
+                    findings.append(
+                        ToolFinding(
+                            path=rel,
+                            start_line=first_proto_lineno,
+                            end_line=first_proto_lineno,
+                            finding_type="plain_http_listener",
+                            check_family="terraform",
+                            severity="high",
+                            message="Load balancer listener uses plain HTTP — no TLS or redirect",
+                            control_hints=["SC-8"],
+                            excerpt=block_lines[first_proto_lineno - block_start].strip(),
+                            redacted=False,
+                            limitations=[
+                                "Cannot determine if redirect is configured in a separate resource"
+                            ],
+                        )
+                    )
 
-        # Wildcard IAM: Action="*" and Resource="*" in the same file
+        # AC-6: IAM policy checks — wildcard (gap) and scoped (positive evidence).
         _action_re = re.compile(r'(?i)(?:Action\s*=|"Action"\s*:)\s*"\*"')
         _resource_re = re.compile(r'(?i)(?:Resource\s*=|"Resource"\s*:)\s*"\*"')
         action_line = next((i for i, ln in enumerate(lines, 1) if _action_re.search(ln)), None)
         resource_line = next((i for i, ln in enumerate(lines, 1) if _resource_re.search(ln)), None)
         if action_line and resource_line:
+            action_text = lines[action_line - 1].strip()
+            resource_text = lines[resource_line - 1].strip()
+            wildcard_excerpt = (
+                action_text
+                if action_line == resource_line
+                else f"{action_text} ... {resource_text}"
+            )
             findings.append(
                 ToolFinding(
                     path=rel,
@@ -248,7 +344,51 @@ def _scan_terraform(repo_root: Path, files: list[RepoFile]) -> list[ToolFinding]
                     severity="high",
                     message='IAM policy grants Action "*" on Resource "*" (overly permissive)',
                     control_hints=["AC-6"],
-                    excerpt='Action = "*" ... Resource = "*"',
+                    excerpt=wildcard_excerpt,
+                    redacted=False,
+                    limitations=["Cannot evaluate runtime SCP or permission boundary constraints"],
+                )
+            )
+
+        # Scoped IAM: array-typed actions on specific resources — positive evidence for AC-6.
+        # Matches Action = ["s3:GetObject"] style (list, not wildcard string).
+        _scoped_action_re = re.compile(r'(?i)(?:Action\s*=|"Action"\s*:)\s*\[')
+        _scoped_resource_re = re.compile(r'(?i)(?:Resource\s*=|"Resource"\s*:)\s*\[')
+        scoped_action_line = next(
+            (
+                i
+                for i, ln in enumerate(lines, 1)
+                if _scoped_action_re.search(ln) and '"*"' not in ln
+            ),
+            None,
+        )
+        scoped_resource_line = next(
+            (
+                i
+                for i, ln in enumerate(lines, 1)
+                if _scoped_resource_re.search(ln) and '"*"' not in ln
+            ),
+            None,
+        )
+        if scoped_action_line and scoped_resource_line:
+            action_text = lines[scoped_action_line - 1].strip()
+            resource_text = lines[scoped_resource_line - 1].strip()
+            scoped_excerpt = (
+                action_text
+                if scoped_action_line == scoped_resource_line
+                else f"{action_text} ... {resource_text}"
+            )
+            findings.append(
+                ToolFinding(
+                    path=rel,
+                    start_line=scoped_action_line,
+                    end_line=scoped_resource_line,
+                    finding_type="scoped_iam",
+                    check_family="terraform",
+                    severity="info",
+                    message="IAM policy uses scoped actions on specific resources (least-privilege pattern)",
+                    control_hints=["AC-6"],
+                    excerpt=scoped_excerpt,
                     redacted=False,
                     limitations=["Cannot evaluate runtime SCP or permission boundary constraints"],
                 )
@@ -259,7 +399,7 @@ def _scan_terraform(repo_root: Path, files: list[RepoFile]) -> list[ToolFinding]
         has_s3_bucket = any(_s3_re.search(ln) for ln in lines)
         bucket_line = next((i for i, ln in enumerate(lines, 1) if _s3_re.search(ln)), None)
 
-        # Unencrypted S3: aws_s3_bucket without sse_configuration in same file
+        # SC-28: S3 encryption — gap when absent, positive evidence when present.
         has_sse = any("aws_s3_bucket_server_side_encryption_configuration" in ln for ln in lines)
         if has_s3_bucket and not has_sse:
             findings.append(
@@ -277,6 +417,89 @@ def _scan_terraform(repo_root: Path, files: list[RepoFile]) -> list[ToolFinding]
                     limitations=[
                         "SSE may be configured via bucket policy or default account settings"
                     ],
+                )
+            )
+        elif has_s3_bucket and has_sse:
+            sse_line = next(
+                (
+                    i
+                    for i, ln in enumerate(lines, 1)
+                    if "aws_s3_bucket_server_side_encryption_configuration" in ln
+                ),
+                None,
+            )
+            algo_line = next(
+                (i for i, ln in enumerate(lines, 1) if re.search(r"sse_algorithm\s*=", ln)),
+                None,
+            )
+            excerpt_parts = []
+            if sse_line:
+                excerpt_parts.append(lines[sse_line - 1].strip())
+            if algo_line and algo_line != sse_line:
+                excerpt_parts.append(lines[algo_line - 1].strip())
+            findings.append(
+                ToolFinding(
+                    path=rel,
+                    start_line=sse_line,
+                    end_line=algo_line or sse_line,
+                    finding_type="s3_sse_enabled",
+                    check_family="terraform",
+                    severity="info",
+                    message="S3 bucket server-side encryption is configured",
+                    control_hints=["SC-28"],
+                    excerpt=" | ".join(excerpt_parts) if excerpt_parts else "",
+                    redacted=False,
+                    limitations=["Cannot verify encryption applies to all access paths"],
+                )
+            )
+
+        # AC-3: S3 public access block — positive evidence only when all four
+        # flags are explicitly true. Any one flag left false (or absent) still
+        # permits some public exposure path, so a partial block must not be
+        # reported as "not publicly readable".
+        _PUBLIC_ACCESS_FLAGS = (
+            "block_public_acls",
+            "block_public_policy",
+            "ignore_public_acls",
+            "restrict_public_buckets",
+        )
+        for block_start, block_lines in _extract_resource_blocks(
+            lines, "aws_s3_bucket_public_access_block"
+        ):
+            block_text = "\n".join(block_lines)
+            if not all(
+                re.search(rf"{flag}\s*=\s*true", block_text, re.IGNORECASE)
+                for flag in _PUBLIC_ACCESS_FLAGS
+            ):
+                continue
+            flag_lines = [
+                (block_start + j, ln.strip())
+                for j, ln in enumerate(block_lines)
+                if re.search(
+                    "|".join(rf"{flag}\s*=\s*true" for flag in _PUBLIC_ACCESS_FLAGS),
+                    ln,
+                    re.IGNORECASE,
+                )
+            ]
+            if flag_lines:
+                start_l, end_l = flag_lines[0][0], flag_lines[-1][0]
+                excerpt = " | ".join(pair[1] for pair in flag_lines)
+            else:
+                start_l = end_l = block_start
+                excerpt = block_lines[0].strip()
+            findings.append(
+                ToolFinding(
+                    path=rel,
+                    start_line=start_l,
+                    end_line=end_l,
+                    finding_type="s3_public_access_block",
+                    check_family="terraform",
+                    severity="info",
+                    message="S3 public access block is fully configured — bucket not publicly readable",
+                    control_hints=["AC-3"],
+                    excerpt=excerpt,
+                    redacted=False,
+                    limitations=["Cannot verify this applies to all buckets in the account"],
                 )
             )
 

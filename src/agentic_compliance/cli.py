@@ -8,7 +8,10 @@ stays fast and runnable from day one without the full agent stack installed.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+
+from dotenv import find_dotenv, load_dotenv
 
 
 def cmd_assess(args: argparse.Namespace) -> int:
@@ -22,6 +25,34 @@ def cmd_assess(args: argparse.Namespace) -> int:
     if not args.repo_url and not args.repo_path:
         print(
             "Provide --repo-url <public GitHub URL> or --repo-path <local path>.", file=sys.stderr
+        )
+        return 2
+
+    if args.controls and args.top_k_controls is not None:
+        print(
+            "[agentic-compliance] --controls and --top-k-controls are mutually exclusive. "
+            "Use --controls for explicit selection or --top-k-controls for dynamic selection.",
+            file=sys.stderr,
+        )
+        return 2
+
+    top_k = args.top_k_controls if args.top_k_controls is not None else 6
+    if top_k < 1:
+        print(
+            "[agentic-compliance] --top-k-controls must be a positive integer (≥ 1).",
+            file=sys.stderr,
+        )
+        return 2
+
+    # Fail fast with an actionable message before any cloning/embedding work —
+    # the raw KeyError from init_chat_model(os.environ["CHAT_MODEL"]) inside the
+    # graph is otherwise opaque (only surfaces after the repo is already loaded).
+    if not os.environ.get("CHAT_MODEL"):
+        print(
+            "[agentic-compliance] CHAT_MODEL is not set. Copy .env.example to .env "
+            "and fill in CHAT_MODEL plus the matching provider API key (e.g. "
+            "ANTHROPIC_API_KEY), or export CHAT_MODEL directly in your shell.",
+            file=sys.stderr,
         )
         return 2
 
@@ -39,7 +70,15 @@ def cmd_assess(args: argparse.Namespace) -> int:
             return 2
 
     print(f"[agentic-compliance] Assessing {repo_root} …", flush=True)
-    report = run_assessment(repo_root, controls=controls)
+    try:
+        report = run_assessment(repo_root, controls=controls, top_k_controls=top_k)
+    except FileNotFoundError as exc:
+        # Missing or uninitialised KB — user-fixable; exit 2.
+        print(f"[agentic-compliance] {exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:
+        print(f"[agentic-compliance] Assessment failed: {exc}", file=sys.stderr)
+        return 1
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -95,7 +134,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Public GitHub URL. Cloned read-only, shallow, no submodules, never executed.",
     )
     grp.add_argument("--repo-path", help="Path to a local repository (e.g. a test fixture).")
-    a.add_argument("--controls", help="Comma-separated control IDs (default: all in the rubric).")
+    a.add_argument(
+        "--controls",
+        help="Comma-separated control IDs for explicit selection. Cannot be used with --top-k-controls.",
+    )
+    a.add_argument(
+        "--top-k-controls",
+        dest="top_k_controls",
+        type=int,
+        default=None,
+        metavar="K",
+        help="Number of controls to select dynamically via semantic search (default: 6). Cannot be used with --controls.",
+    )
     a.add_argument("--out", default="artifacts/report.json", help="Output path for the report.")
     a.add_argument("--format", choices=["json", "md"], default="json", help="Report format.")
     a.set_defaults(func=cmd_assess)
@@ -120,6 +170,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Mirrors Docker (--env-file) and the IDE launch configs (envFile), so a plain
+    # CLI invocation from a shell picks up the same .env without manual sourcing.
+    # usecwd=True: search from the shell's cwd, not this installed module's location
+    # (the default search walks up from __file__, which for an installed console
+    # script resolves under site-packages and would not find a project-local .env).
+    # override=False (the default): real exported shell vars still win over .env.
+    load_dotenv(find_dotenv(usecwd=True))
     args = build_parser().parse_args(argv)
     return args.func(args)
 

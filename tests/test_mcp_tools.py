@@ -310,20 +310,180 @@ class TestScanIACSecurity:
         assert any(f.finding_type == "k8s_missing_security_context" for f in findings)
 
     def test_terraform_flags_plain_http_listener(self, tmp_path):
-        """scan_iac_security flags protocol = "HTTP" in a load balancer listener."""
+        """scan_iac_security flags plain HTTP listener with no redirect action."""
         (tmp_path / "main.tf").write_text(
-            'resource "aws_lb_listener" "http" {\n  port     = 80\n  protocol = "HTTP"\n}\n'
+            'resource "aws_lb_listener" "http" {\n  port = 80\n  protocol = "HTTP"\n  default_action {\n    type = "forward"\n  }\n}\n'
         )
         findings = scan_iac_security(tmp_path)
         assert any(f.finding_type == "plain_http_listener" for f in findings)
 
     def test_terraform_plain_http_listener_has_sc8_control_hint(self, tmp_path):
         """plain_http_listener finding is mapped to SC-8."""
-        (tmp_path / "main.tf").write_text('  protocol = "HTTP"\n')
+        (tmp_path / "main.tf").write_text(
+            'resource "aws_lb_listener" "http" {\n  port = 80\n  protocol = "HTTP"\n  default_action {\n    type = "forward"\n  }\n}\n'
+        )
         findings = scan_iac_security(tmp_path)
         for f in findings:
             if f.finding_type == "plain_http_listener":
                 assert "SC-8" in f.control_hints
+
+    def test_terraform_https_listener_emits_positive_evidence(self, tmp_path):
+        """scan_iac_security emits https_listener for a TLS-terminated listener."""
+        (tmp_path / "main.tf").write_text(
+            'resource "aws_lb_listener" "https" {\n'
+            "  port       = 443\n"
+            '  protocol   = "HTTPS"\n'
+            '  ssl_policy = "ELBSecurityPolicy-TLS13-1-2-2021-06"\n'
+            '  certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/abc"\n'
+            '  default_action { type = "forward" target_group_arn = "tg" }\n'
+            "}\n"
+        )
+        findings = scan_iac_security(tmp_path)
+        assert any(f.finding_type == "https_listener" for f in findings)
+        assert not any(f.finding_type == "plain_http_listener" for f in findings)
+
+    def test_terraform_http_to_https_redirect_emits_positive_evidence(self, tmp_path):
+        """scan_iac_security emits http_to_https_redirect instead of plain_http_listener."""
+        (tmp_path / "main.tf").write_text(
+            'resource "aws_lb_listener" "redirect" {\n'
+            "  port     = 80\n"
+            '  protocol = "HTTP"\n'
+            "  default_action {\n"
+            '    type = "redirect"\n'
+            "    redirect {\n"
+            '      port        = "443"\n'
+            '      protocol    = "HTTPS"\n'
+            '      status_code = "HTTP_301"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
+        )
+        findings = scan_iac_security(tmp_path)
+        assert any(f.finding_type == "http_to_https_redirect" for f in findings)
+        assert not any(f.finding_type == "plain_http_listener" for f in findings)
+
+    def test_secure_fixture_has_no_plain_http_listener(self):
+        """secure_terraform_app HTTP listener is a redirect — no plain_http_listener finding."""
+        findings = scan_iac_security(FIXTURES / "secure_terraform_app")
+        assert not any(f.finding_type == "plain_http_listener" for f in findings)
+
+    def test_secure_fixture_has_https_listener(self):
+        """secure_terraform_app HTTPS listener is detected as positive evidence."""
+        findings = scan_iac_security(FIXTURES / "secure_terraform_app")
+        assert any(f.finding_type == "https_listener" for f in findings)
+
+    def test_secure_fixture_has_http_redirect(self):
+        """secure_terraform_app HTTP listener redirects to HTTPS — detected as positive evidence."""
+        findings = scan_iac_security(FIXTURES / "secure_terraform_app")
+        assert any(f.finding_type == "http_to_https_redirect" for f in findings)
+
+    def test_secure_fixture_has_scoped_iam(self):
+        """secure_terraform_app scoped IAM policy is detected as positive evidence."""
+        findings = scan_iac_security(FIXTURES / "secure_terraform_app")
+        assert any(f.finding_type == "scoped_iam" for f in findings)
+
+    def test_scoped_iam_excerpt_contains_real_code(self):
+        """scoped_iam excerpt is actual code, not a synthetic placeholder."""
+        findings = scan_iac_security(FIXTURES / "secure_terraform_app")
+        scoped = next(f for f in findings if f.finding_type == "scoped_iam")
+        assert "s3:GetObject" in scoped.excerpt
+        assert "arn:aws:s3:::" in scoped.excerpt
+
+    def test_wildcard_iam_excerpt_contains_real_code(self):
+        """wildcard_iam excerpt is actual code lines, not a synthetic description."""
+        findings = scan_iac_security(FIXTURES / "insecure_terraform_app")
+        wildcard = next(f for f in findings if f.finding_type == "wildcard_iam")
+        assert '"*"' in wildcard.excerpt
+
+    def test_secure_fixture_emits_s3_sse_enabled(self):
+        """secure_terraform_app SSE config produces positive SC-28 evidence."""
+        findings = scan_iac_security(FIXTURES / "secure_terraform_app")
+        assert any(f.finding_type == "s3_sse_enabled" for f in findings)
+
+    def test_s3_sse_enabled_mapped_to_sc28(self):
+        """s3_sse_enabled finding maps to SC-28."""
+        findings = scan_iac_security(FIXTURES / "secure_terraform_app")
+        sse = next(f for f in findings if f.finding_type == "s3_sse_enabled")
+        assert "SC-28" in sse.control_hints
+
+    def test_s3_sse_enabled_excerpt_contains_real_code(self):
+        """s3_sse_enabled excerpt contains actual SSE configuration text, not a placeholder."""
+        findings = scan_iac_security(FIXTURES / "secure_terraform_app")
+        sse = next(f for f in findings if f.finding_type == "s3_sse_enabled")
+        assert (
+            "sse_algorithm" in sse.excerpt or "server_side_encryption_configuration" in sse.excerpt
+        )
+
+    def test_insecure_fixture_has_no_s3_sse_enabled(self):
+        """insecure_terraform_app lacks SSE — no s3_sse_enabled finding."""
+        findings = scan_iac_security(FIXTURES / "insecure_terraform_app")
+        assert not any(f.finding_type == "s3_sse_enabled" for f in findings)
+
+    def test_secure_fixture_emits_s3_public_access_block(self):
+        """secure_terraform_app public access block produces positive AC-3 evidence."""
+        findings = scan_iac_security(FIXTURES / "secure_terraform_app")
+        assert any(f.finding_type == "s3_public_access_block" for f in findings)
+
+    def test_s3_public_access_block_mapped_to_ac3(self):
+        """s3_public_access_block finding maps to AC-3."""
+        findings = scan_iac_security(FIXTURES / "secure_terraform_app")
+        block = next(f for f in findings if f.finding_type == "s3_public_access_block")
+        assert "AC-3" in block.control_hints
+
+    def test_s3_public_access_block_excerpt_contains_real_code(self):
+        """s3_public_access_block excerpt contains all four flag lines, not a placeholder."""
+        findings = scan_iac_security(FIXTURES / "secure_terraform_app")
+        block = next(f for f in findings if f.finding_type == "s3_public_access_block")
+        for flag in (
+            "block_public_acls",
+            "block_public_policy",
+            "ignore_public_acls",
+            "restrict_public_buckets",
+        ):
+            assert flag in block.excerpt
+
+    def test_insecure_fixture_has_no_s3_public_access_block(self):
+        """insecure_terraform_app has no public access block — no positive finding."""
+        findings = scan_iac_security(FIXTURES / "insecure_terraform_app")
+        assert not any(f.finding_type == "s3_public_access_block" for f in findings)
+
+    def test_partial_public_access_block_is_not_positive_evidence(self, tmp_path):
+        """A block with only one of four flags true must not claim full protection.
+
+        Regression test: block_public_acls=true alone leaves block_public_policy,
+        ignore_public_acls, and restrict_public_buckets unset, which still permits
+        public exposure paths (e.g. a public bucket policy). Reporting this as
+        positive AC-3 evidence would overclaim protection.
+        """
+        (tmp_path / "main.tf").write_text(
+            'resource "aws_s3_bucket" "data" {\n'
+            '  bucket = "example-data"\n'
+            "}\n"
+            'resource "aws_s3_bucket_public_access_block" "data" {\n'
+            "  bucket             = aws_s3_bucket.data.id\n"
+            "  block_public_acls  = true\n"
+            "  block_public_policy = false\n"
+            "}\n"
+        )
+        findings = scan_iac_security(tmp_path)
+        assert not any(f.finding_type == "s3_public_access_block" for f in findings)
+
+    def test_scoped_iam_mapped_to_ac6(self, tmp_path):
+        """scoped_iam finding is mapped to AC-6."""
+        (tmp_path / "main.tf").write_text(
+            'resource "aws_iam_policy" "scoped" {\n'
+            "  policy = jsonencode({\n"
+            "    Statement = [{\n"
+            '      Action   = ["s3:GetObject"]\n'
+            '      Resource = ["arn:aws:s3:::my-bucket/*"]\n'
+            "    }]\n"
+            "  })\n"
+            "}\n"
+        )
+        findings = scan_iac_security(tmp_path)
+        scoped = [f for f in findings if f.finding_type == "scoped_iam"]
+        assert scoped
+        assert all("AC-6" in f.control_hints for f in scoped)
 
     def test_dockerfile_flags_numeric_uid_zero(self, tmp_path):
         """scan_iac_security flags USER 0 (numeric root UID)."""

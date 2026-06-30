@@ -186,14 +186,14 @@ class TestCollectEvidenceAC6:
 
 class TestCollectEvidenceSecrets:
     def test_secrets_fixture_has_evidence(self):
-        """collect_evidence finds credential evidence in hardcoded_secret_app for IA-5/SI."""
-        result = collect_evidence(FIXTURES / "hardcoded_secret_app", _control("IA-5/SI"))
+        """collect_evidence finds credential evidence in hardcoded_secret_app for IA-5."""
+        result = collect_evidence(FIXTURES / "hardcoded_secret_app", _control("IA-5"))
         assert result.errors == []
         assert result.evidence, "Expected at least one secrets finding"
 
     def test_secrets_excerpts_are_redacted(self):
         """No raw secret value appears in any EvidenceRef excerpt."""
-        result = collect_evidence(FIXTURES / "hardcoded_secret_app", _control("IA-5/SI"))
+        result = collect_evidence(FIXTURES / "hardcoded_secret_app", _control("IA-5"))
         raw_values = [
             "AKIAIOSFODNN7EXAMPLE",
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
@@ -262,13 +262,13 @@ class TestCollectEvidenceFailClosed:
 
     def test_errors_and_evidence_can_coexist(self):
         """Partial failure: one tool errors, another succeeds — both are recorded."""
-        result_before = collect_evidence(FIXTURES / "hardcoded_secret_app", _control("IA-5/SI"))
-        # IA-5/SI uses secrets + ci tools; secrets succeeds, mock ci to fail
+        result_before = collect_evidence(FIXTURES / "hardcoded_secret_app", _control("IA-5"))
+        # IA-5 uses secrets + ci tools; secrets succeeds, mock ci to fail
         with patch(
             "agentic_compliance.tools.scan_ci_security",
             side_effect=RuntimeError("ci tool broke"),
         ):
-            result = collect_evidence(FIXTURES / "hardcoded_secret_app", _control("IA-5/SI"))
+            result = collect_evidence(FIXTURES / "hardcoded_secret_app", _control("IA-5"))
         # secrets evidence still present
         assert result.evidence
         # ci error recorded

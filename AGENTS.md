@@ -37,7 +37,7 @@ It is built around production-oriented agent engineering:
 - Pydantic typed response schemas
 - FastMCP / MCP Python SDK
 - `langchain-mcp-adapters`
-- Chroma or FAISS for the small controls KB
+- Chroma for the controls KB (vectors + retrieval text + `{control_id, name}` metadata; full rubric content stays in `data/controls.yaml`)
 - pytest
 - scikit-learn for verdict metrics
 - Optional: RAGAS for grounding metrics

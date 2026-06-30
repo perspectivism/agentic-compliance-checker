@@ -40,7 +40,7 @@ cases:
 
   - id: secret_001
     repo_fixture: hardcoded_secret_app
-    control_id: IA-5/SI
+    control_id: IA-5
     question: "Does the repo contain hardcoded secrets?"
     expected_verdict: gap
     expected_evidence_hints:

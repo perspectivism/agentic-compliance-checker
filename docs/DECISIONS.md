@@ -44,15 +44,25 @@ capped by `MAX_VERIFIER_ATTEMPTS` counter and `GRAPH_RECURSION_LIMIT`.
 **Context.** Two very different inputs: control *text* (fuzzy) and repo *evidence* (exact).
 **Decision.** Semantic retrieval over the control/rubric KB for dynamic control
 selection; deterministic regex/AST/structured scans over the repo via MCP tools.
-For the fixed v1 rubric (14 controls), the KB is pre-loaded at assess time — semantic
-retrieval is built and available but not yet on the assess critical path.
 **Rejected.** (a) Embed everything — vector search over Terraform is unreliable for
 exact attributes ("is `storage_encrypted = true` present"). (b) Pure structured —
 misses fuzzy "which control is relevant" matching. Naming this split is a deliberate
 design choice, not an accident.
-**Status:** confirmed (M3/M4). M5 pre-loads all controls into graph state via exact
-`load_controls()` lookup; semantic retrieval via `ControlsRetriever` is available but
-not yet wired as a graph node — sufficient for the fixed 14-control rubric.
+**Status:** confirmed (M3/M4/M5.5). M5.5 wires semantic retrieval as a **pre-graph
+control selection step**: `run_assessment()` detects repo technology features, builds a
+semantic query, and calls `ControlsRetriever.search_with_scores()` to select the top-k
+most relevant controls before the graph starts. Explicit `--controls` bypasses retrieval.
+M5.5 selection is two-layered: a structural file-tree pass plus a bounded `.tf`
+resource-declaration pass for Terraform-specific query terms. The content-read pass
+uses `iter_repo_files()` so symlink-escape checks, size caps, binary detection, and
+allowlists remain the single trust boundary for repo reads.
+The YAML is the source of truth for full rubric content (evidence hints, scanner hints);
+Chroma holds embedding vectors, retrieval text (`embed_text`), and `{control_id, name}`
+metadata — enough to rank controls, not enough to reason over them. After
+selection, `retriever.get_by_ids()` materializes the chosen `ControlEntry` objects from
+the in-memory index — no second YAML read. At scale (hundreds of controls), the rubric
+content would move into Chroma document `page_content` so retrieval returns full rubric
+text directly; at 14 controls the YAML+Chroma split is the correct authoring surface.
 
 ### D3 — Tools exposed over a self-built MCP server (not in-process functions)
 **Context.** The agent needs read-only repo-inspection tools; control lookup is handled by RAG over the controls KB, not an MCP tool.
@@ -126,8 +136,16 @@ agent will then faithfully implement, blind spots and all.
 A non-root container (which also happens to satisfy control CM-2/CM-6). KB and reports
 are volumes; API keys via `.env`.
 **Rejected.** A separate MCP container — an unnecessary process boundary for a stdio server.
-**Status:** confirmed (M2/M5). MCP server implemented; CLI `assess` subcommand wired to
-`run_assessment` in M5. Docker packaging deferred to M8.
+**Status:** confirmed (M2/M5/M5.5). MCP server implemented; CLI `assess` subcommand wired to
+`run_assessment` in M5. Docker packaging itself is implemented, not deferred — Dockerfile +
+docker-compose.yml, non-root user (fixed UID 10001), MCP stdio subprocess. M5.5 hardened it
+further: `chroma_db`/`artifacts` are named Docker volumes (not bind mounts), avoiding a
+host/container UID mismatch that broke local read/write sharing with a venv CLI; the image
+build decouples the ~5-minute `pip install -e .` layer from source/README changes (a stub
+package + README stand in at install time; the real files land after via `COPY . .`), cutting
+source-only rebuilds dramatically; and `make build` builds only the `app` service
+instead of redundantly exporting the same image three times across `app`/`test`/`test-all`.
+Remaining Docker-adjacent polish (run/tool-call logs, etc.) stays scoped to M8.
 
 ### D11 — Interface: CLI + rendered report, no custom web frontend
 **Context.** The output is a structured report, consumed programmatically.

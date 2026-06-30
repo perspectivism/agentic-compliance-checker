@@ -32,10 +32,10 @@ Verdicts:
 | AU-2/AU-12 | Audit logging | CloudTrail, ALB/S3 access logs, app audit logger | logging disabled or absent | Code/IaC only |
 | AU-9 | Audit log protection | immutable/versioned log bucket, validation enabled | mutable log store, no validation | Often partial |
 | SI-2/RA-5 | Vulnerability scanning | Trivy/Snyk/pip-audit/Dependabot in CI | no dependency scanning config | CI evidence |
-| IA-5/SI | Secrets handling | env vars, secrets manager, OIDC, no committed secrets | hardcoded API keys/passwords/tokens | Scanner-backed |
+| IA-5 | Secrets handling | env vars, secrets manager, OIDC, no committed secrets | hardcoded API keys/passwords/tokens | Scanner-backed |
 | CM-2/CM-6 | Container baseline hardening | non-root USER, pinned base, minimal image | root user, latest tag, privileged | Docker/K8s evidence |
 | CM-3 | Change control | CODEOWNERS, branch protection config, required reviews in CI metadata | no review/change gate evidence | May be not-assessable from repo alone |
-| SI-4/AU | Monitoring and alerting | CloudWatch alarms, GuardDuty, alert rules, app metrics | no monitoring resources | Context-dependent |
+| SI-4 | Monitoring and alerting | CloudWatch alarms, GuardDuty, alert rules, app metrics | no monitoring resources | Context-dependent |
 
 ## Not assessable controls
 

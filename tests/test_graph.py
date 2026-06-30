@@ -6,10 +6,13 @@ import uuid
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agentic_compliance.graph import (
     MAX_VERIFIER_ATTEMPTS,
     _build_graph,
     _initial_state,
+    _require_chat_model,
 )
 from agentic_compliance.kb import build_exact_index, load_controls
 from agentic_compliance.schemas import (
@@ -262,30 +265,30 @@ class TestEvidenceProvenance:
 
         assert report.repo_path == str(root.resolve())
 
-    def test_satisfied_without_evidence_is_fail_closed(self):
+    def test_satisfied_without_evidence_is_fail_closed(self, tmp_path):
         """Verifier-approved 'satisfied' with no scanner evidence is downgraded deterministically."""
         synth = _mock_synthesizer(
             SynthesizerOutput(verdict=VerdictClass.satisfied, rationale="looks fine"),
         )
         ver = _mock_verifier(VerifierDecision(approved=True, notes="approved"))
 
-        # secure_terraform_app has no IAM violations for AC-6 → empty scanner evidence
-        report = _run(FIXTURES / "secure_terraform_app", [_ctrl("AC-6")], synth, ver)
+        # Empty repo — no Terraform/IaC files → guaranteed empty scanner evidence for any control.
+        report = _run(tmp_path, [_ctrl("AC-6")], synth, ver)
 
         v = report.verdicts[0]
         assert v.verdict == VerdictClass.not_assessable
         assert v.verifier_status == "failed"
         assert "[fail-closed" in v.rationale
 
-    def test_gap_without_evidence_is_fail_closed(self):
+    def test_gap_without_evidence_is_fail_closed(self, tmp_path):
         """Verifier-approved 'gap' with no scanner evidence is downgraded — guard covers all verdicts."""
         synth = _mock_synthesizer(
             SynthesizerOutput(verdict=VerdictClass.gap, rationale="no encryption config seen"),
         )
         ver = _mock_verifier(VerifierDecision(approved=True, notes="approved"))
 
-        # secure_terraform_app has no IAM violations for AC-6 → empty scanner evidence.
-        report = _run(FIXTURES / "secure_terraform_app", [_ctrl("AC-6")], synth, ver)
+        # Empty repo — no Terraform/IaC files → guaranteed empty scanner evidence for any control.
+        report = _run(tmp_path, [_ctrl("AC-6")], synth, ver)
 
         v = report.verdicts[0]
         assert v.verdict == VerdictClass.not_assessable
@@ -328,6 +331,26 @@ class TestEvidenceProvenance:
         v = report.verdicts[0]
         assert v.verdict == VerdictClass.satisfied
         assert v.verifier_status == "passed"
+
+
+# ── CHAT_MODEL backstop ──────────────────────────────────────────────────────
+
+
+class TestRequireChatModel:
+    def test_raises_clear_error_when_unset(self, monkeypatch):
+        """Missing CHAT_MODEL raises RuntimeError with an actionable message, not a bare KeyError.
+
+        Regression guard: this is the backstop for callers that bypass the CLI's own
+        pre-flight check (tests calling run_assessment/the graph directly, langgraph dev).
+        """
+        monkeypatch.delenv("CHAT_MODEL", raising=False)
+        with pytest.raises(RuntimeError, match="CHAT_MODEL"):
+            _require_chat_model()
+
+    def test_returns_value_when_set(self, monkeypatch):
+        """CHAT_MODEL set → returned as-is."""
+        monkeypatch.setenv("CHAT_MODEL", "anthropic:claude-sonnet-4-6")
+        assert _require_chat_model() == "anthropic:claude-sonnet-4-6"
 
 
 # ── State schema ───────────────────────────────────────────────────────────────

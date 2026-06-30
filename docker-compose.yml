@@ -18,10 +18,12 @@ services:
     image: agentic-compliance-checker:latest
     env_file: .env
     volumes:
-      - ./chroma_db:/app/chroma_db      # persisted controls knowledge base
-      - ./artifacts:/app/artifacts      # eval reports + generated assessment reports
+      - chroma_db:/app/chroma_db      # persisted controls knowledge base
+      - artifacts:/app/artifacts      # eval reports + generated assessment reports
 
-  # Fast test service: deterministic tests only, no model/network access, no credentials.
+  # Fast test service: deterministic tests only, no model/network access, no
+  # credentials. This is enforced structurally by omitting env_file, so accidental
+  # live-model/API use fails closed instead of consuming credentials.
   test:
     build: .
     image: agentic-compliance-checker:latest
@@ -33,7 +35,10 @@ services:
       - .:/app
 
   # Full test service: runs the entire suite including @pytest.mark.agent tests.
-  # Requires API keys in .env.
+  # Currently free: local embeddings by default, and no test today calls the
+  # real chat model. That reflects the current test suite, not a guarantee —
+  # env_file stays wired up so CHAT_MODEL/EMBEDDINGS_MODEL/API keys apply
+  # whenever a future test, or a switch to API-backed embeddings, needs them.
   test-all:
     build: .
     image: agentic-compliance-checker:latest
@@ -44,3 +49,16 @@ services:
     command: ["-q"]
     volumes:
       - .:/app
+
+# Named volumes (not host bind mounts): Docker owns and manages these
+# internally, so the container's fixed non-root UID (see Dockerfile) can
+# always read/write them regardless of the host's UID — no permission
+# wrangling between the container and a local venv CLI. Trade-off: you can't
+# browse the contents directly from the host shell. For artifacts, use
+# `make export-artifacts` (EXPORT_DIR=<path> to choose the destination). For
+# ad hoc inspection of either volume — `app` has no long-running container to
+# `exec` into, so use `run --rm` with an overridden entrypoint instead:
+# `docker compose run --rm --entrypoint sh app -c 'ls /app/chroma_db'`
+volumes:
+  chroma_db:
+  artifacts:

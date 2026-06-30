@@ -9,6 +9,7 @@ controls:
 
   - id: SC-8
     name: "Transmission confidentiality and integrity"
+    nist_refs: ["SC-8"]
     positive_evidence: "HTTPS listeners, TLS 1.2+, HTTP-to-HTTPS redirect, secure ingress config"
     gap_evidence: "Plain HTTP listener exposed, weak TLS, no redirect"
     notes: "IaC-focused"
@@ -26,6 +27,7 @@ controls:
 
   - id: SC-28
     name: "Protection of information at rest"
+    nist_refs: ["SC-28"]
     positive_evidence: "S3 SSE, RDS/EBS encryption, storage encryption enabled"
     gap_evidence: "Encryption disabled or absent on storage resources"
     notes: "Context-dependent"
@@ -42,6 +44,7 @@ controls:
 
   - id: SC-12
     name: "Cryptographic key management"
+    nist_refs: ["SC-12"]
     positive_evidence: "KMS key, key rotation, managed key references"
     gap_evidence: "Hardcoded keys, disabled rotation"
     notes: "Avoid claiming procedural key governance"
@@ -58,6 +61,7 @@ controls:
 
   - id: IA-2
     name: "MFA for privileged access"
+    nist_refs: ["IA-2"]
     positive_evidence: "MFA condition in IAM policy, SSO/MFA config"
     gap_evidence: "Privileged policy lacks MFA condition"
     notes: "Often partial/not-assessable"
@@ -73,6 +77,7 @@ controls:
 
   - id: AC-6
     name: "Least privilege"
+    nist_refs: ["AC-6"]
     positive_evidence: "Scoped IAM actions/resources"
     gap_evidence: "Action: *, Resource: *, broad admin policies"
     notes: "Strong code-detectable signal"
@@ -89,6 +94,7 @@ controls:
 
   - id: AC-3
     name: "Access enforcement and public exposure"
+    nist_refs: ["AC-3"]
     positive_evidence: "S3 public access block, scoped security groups"
     gap_evidence: "Public buckets, 0.0.0.0/0 to admin ports"
     notes: "High-confidence IaC evidence"
@@ -106,6 +112,7 @@ controls:
 
   - id: SC-7
     name: "Boundary protection"
+    nist_refs: ["SC-7"]
     positive_evidence: "Private subnets, security group references, segmented tiers"
     gap_evidence: "Flat network, public database, permissive ingress"
     notes: "Partial if only some tiers protected"
@@ -123,6 +130,7 @@ controls:
 
   - id: AU-2/AU-12
     name: "Audit logging"
+    nist_refs: ["AU-2", "AU-12"]
     positive_evidence: "CloudTrail, ALB/S3 access logs, app audit logger"
     gap_evidence: "Logging disabled or absent"
     notes: "Code/IaC only"
@@ -140,6 +148,7 @@ controls:
 
   - id: AU-9
     name: "Audit log protection"
+    nist_refs: ["AU-9"]
     positive_evidence: "Immutable/versioned log bucket, validation enabled"
     gap_evidence: "Mutable log store, no validation"
     notes: "Often partial"
@@ -156,6 +165,7 @@ controls:
 
   - id: SI-2/RA-5
     name: "Vulnerability scanning"
+    nist_refs: ["SI-2", "RA-5"]
     positive_evidence: "Trivy/Snyk/pip-audit/Dependabot in CI"
     gap_evidence: "No dependency scanning config"
     notes: "CI evidence"
@@ -170,8 +180,9 @@ controls:
       Dependabot renovate CVE patch vulnerability management software composition analysis
       SCA DAST SAST security scanning CI pipeline supply chain known vulnerability
 
-  - id: IA-5/SI
+  - id: IA-5
     name: "Secrets handling"
+    nist_refs: ["IA-5"]
     positive_evidence: "Env vars, secrets manager, OIDC, no committed secrets"
     gap_evidence: "Hardcoded API keys/passwords/tokens"
     notes: "Scanner-backed"
@@ -190,6 +201,7 @@ controls:
 
   - id: CM-2/CM-6
     name: "Container baseline hardening"
+    nist_refs: ["CM-2", "CM-6"]
     positive_evidence: "Non-root USER, pinned base, minimal image"
     gap_evidence: "Root user, latest tag, privileged container"
     notes: "Docker/K8s evidence"
@@ -209,6 +221,7 @@ controls:
 
   - id: CM-3
     name: "Change control"
+    nist_refs: ["CM-3"]
     positive_evidence: "CODEOWNERS, branch protection config, required reviews in CI metadata"
     gap_evidence: "No review/change gate evidence"
     notes: "May be not-assessable from repo alone"
@@ -223,8 +236,9 @@ controls:
       code review change management CI gate CODEOWNERS file merge protection
       change approval workflow peer review required approvers
 
-  - id: SI-4/AU
+  - id: SI-4
     name: "Monitoring and alerting"
+    nist_refs: ["SI-4"]
     positive_evidence: "CloudWatch alarms, GuardDuty, alert rules, app metrics"
     gap_evidence: "No monitoring resources"
     notes: "Context-dependent"

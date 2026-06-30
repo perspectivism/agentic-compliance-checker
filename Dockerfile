@@ -29,13 +29,25 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install dependencies first for layer caching. The package uses a src/ layout,
-# so the package dir must exist at install time (editable install).
-COPY pyproject.toml README.md ./
-COPY src/ ./src/
+# Install dependencies first for layer caching — and, critically, decoupled
+# from source/README changes. pip install -e . pulls in the full ML/vector
+# stack (torch, transformers, chromadb, ...) and takes ~5 minutes; without
+# this split, editing a single source file or a README typo invalidates this
+# layer and forces the whole multi-minute reinstall on every build. pip
+# install -e . needs *a* discoverable package plus a readable README
+# (referenced by `readme = "README.md"` in pyproject.toml) — not necessarily
+# the real ones, so stubs stand in here. The real files land via the "rest of
+# the project" COPY below and take effect with no re-install, since an
+# editable install is a path-pointer resolved at import time, not a static
+# copy baked in at install time. Net effect: only a pyproject.toml change
+# (new/updated dependency) re-triggers the slow install; source/README edits
+# hit only the cheap COPY below.
+COPY pyproject.toml ./
+RUN mkdir -p src/agentic_compliance \
+ && touch src/agentic_compliance/__init__.py README.md
 RUN pip install --upgrade pip && pip install -e ".[dev,agent]"
 
-# Copy the rest of the project (docs, data, scripts, tests).
+# Copy the rest of the project (src, README, docs, data, scripts, tests).
 COPY . .
 
 # Run as non-root. (Fittingly, this is the exact CM-2/CM-6 control the tool checks for.)

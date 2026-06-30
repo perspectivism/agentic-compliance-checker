@@ -15,7 +15,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ToolFinding(BaseModel):
@@ -136,9 +136,43 @@ class ControlVerdict(BaseModel):
     attempt: int = 1  # which synthesis attempt produced this verdict
 
 
+class SelectedControl(BaseModel):
+    """One control in a SelectionResult, with optional retrieval relevance score.
+
+    relevance_score is None for explicit mode (no retrieval performed).
+    For dynamic mode it is in [0, 1], higher means more relevant to the query.
+    """
+
+    control_id: str
+    relevance_score: float | None = None
+
+
+class SelectionResult(BaseModel):
+    """Describes how controls were chosen for an assessment run.
+
+    Stored as a typed first-class field on FinalReport (not buried in audit) so
+    eval code can inspect mode, query, and per-control scores without parsing
+    freeform metadata.
+
+    Explicit mode: top_k, detected_features, and selection_query are empty/None;
+    every SelectedControl has relevance_score=None.
+    Dynamic mode: all fields are populated; selected_controls is in ranking order
+    (highest relevance first).
+    """
+
+    mode: Literal["dynamic", "explicit"]
+    top_k: int | None = None  # requested k; only meaningful for dynamic mode
+    detected_features: list[str] = []
+    selection_query: str = ""
+    selected_controls: list[SelectedControl]
+
+
 class FinalReport(BaseModel):
     """Complete assessment report for one repository run."""
 
     repo_path: str
     verdicts: list[ControlVerdict]
+    selection: SelectionResult = Field(
+        default_factory=lambda: SelectionResult(mode="explicit", selected_controls=[])
+    )
     audit: dict[str, Any]  # run_id, started_at, model_id, verdict counts

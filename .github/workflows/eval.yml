@@ -15,8 +15,7 @@ on:
   # Uncomment to enable.
   # pull_request:
   #   paths:
-  #     - "src/agentic_compliance/graph.py"
-  #     - "src/agentic_compliance/**/prompt*"
+  #     - "src/agentic_compliance/graph.py"  # Synthesizer + Verifier system prompts live here
   #     - "docs/RUBRIC.md"
   #     - "data/golden_set.yaml"
 

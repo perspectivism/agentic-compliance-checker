@@ -29,6 +29,7 @@ Mark any test that needs the live agent stack (model/network/keys) with
 - file filters
 - scanners
 - control retrieval
+- control selection (feature detection, query building, score normalization, explicit/dynamic modes)
 - graph routing
 - verifier logic
 - evaluation metrics
@@ -77,6 +78,7 @@ tests/
   test_controls_retriever.py
   test_evidence_node.py
   test_graph.py
+  test_control_selection.py
   test_golden_set.py
   test_eval.py
   test_observability.py

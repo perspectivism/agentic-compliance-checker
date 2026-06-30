@@ -1,5 +1,5 @@
 # Fixture: hardcoded_secret_app
-# Intended GAP evidence for IA-5/SI (secrets handling).
+# Intended GAP evidence for IA-5 (secrets handling).
 #
 # SAFETY: these are NOT real credentials. The access key below is the
 # non-functional example key from AWS's own public documentation, and the
