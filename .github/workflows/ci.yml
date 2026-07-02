@@ -40,15 +40,11 @@ jobs:
       # Fast lane: deterministic tests (loader, MCP tools, scanners, graph routing
       # with mocked LLMs). Agent-stack tests are marked `agent` and run separately
       # because they may need heavier runtime deps, real embeddings, model/network
-      # access, or API keys.
+      # access, or API keys. Golden-set parsing/schema validation is part of this
+      # lane (tests/test_golden.py) — the real eval (scripts/run_eval.py) runs the
+      # LLM graph and lives in eval.yml (manual dispatch), never here.
       - name: Tests (fast lane)
         run: pytest -m "not agent" -q
-
-      # Eval smoke: validates the golden set parses. Full eval (M7) needs the agent
-      # stack + keys and runs outside this lane.
-      - name: Eval smoke
-        run: |
-          if [ -f scripts/run_eval.py ]; then python scripts/run_eval.py; else echo "run_eval.py not present yet"; fi
 
   # Dogfooding: hold this repo to the same bar the tool assesses others against —
   # dependency scanning (SI-2/RA-5) and no hardcoded secrets (IA-5).

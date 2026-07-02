@@ -131,13 +131,19 @@ def finding_to_evidence(finding: ToolFinding) -> EvidenceRef:
 
     The excerpt is already redacted at the tool layer when finding.redacted is True,
     so no further masking is needed here.
+
+    Absence findings (e.g. container_scan_missing) have no matched text, so their
+    excerpt is empty — for those, the finding's message IS the evidence. Without
+    this fallback the Synthesizer sees a bare file path with no content and cannot
+    tell a gap finding from nothing (M7 eval showed it then either degrades a real
+    gap to not_assessable or, worse, overclaims satisfied on mixed evidence).
     """
     return EvidenceRef(
         source_type="tool_result",
         path_or_id=finding.path,
         start_line=finding.start_line,
         end_line=finding.end_line,
-        excerpt=finding.excerpt,
+        excerpt=finding.excerpt or finding.message,
     )
 
 

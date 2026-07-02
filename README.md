@@ -112,7 +112,7 @@ make test  # fast test suite (-m "not agent")
 make ingest  # build the controls knowledge base
 make assess REPO=https://github.com/OWNER/REPO  # dynamic control selection
 make assess REPO=https://github.com/OWNER/REPO CONTROLS=AC-6,SC-8  # explicit control selection
-make eval  # run the evaluation harness  [M7+]
+make eval  # run the evaluation harness (verdict accuracy vs the frozen golden set)
 make export-artifacts  # copy the Docker report(s) to ./artifacts/docker/ on the host
 ```
 

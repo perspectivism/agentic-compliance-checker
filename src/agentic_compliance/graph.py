@@ -71,12 +71,18 @@ _SYNTHESIZER_SYSTEM = (
     "do not need evidence for every resource type the control could theoretically apply to "
     "(e.g. one correctly-configured S3 bucket is sufficient evidence even if the repo also "
     "has RDS/EBS resources with no evidence either way — unless there is contradictory gap "
-    "evidence or a tool error for those resources, which still forces 'gap' or "
-    "'not_assessable' respectively). 'Positive evidence' and 'gap "
+    "evidence or a tool error for those resources, which changes the verdict to "
+    "'partial'/'gap' or 'not_assessable' respectively). 'Positive evidence' and 'gap "
     "evidence' below list illustrative example categories, not a required checklist — one "
     "matching category is enough, you do not need all of them. Emit 'gap' when findings show "
-    "a control failure. Emit 'not_assessable' when evidence is insufficient or tool errors "
-    "occurred. Base reasoning strictly on the provided evidence — do not invent claims."
+    "a control failure. Emit 'partial' when the evidence is genuinely mixed: at least one "
+    "concrete finding confirms the control AND at least one concrete finding shows a failure "
+    "for another resource, tier, or evidence category under the same control (e.g. one tier's ingress is "
+    "correctly scoped while another tier is open to the internet, or one scanning category is "
+    "configured while another required category is confirmed missing) — do not collapse mixed "
+    "evidence into 'satisfied' or 'gap'. Emit 'not_assessable' when evidence is insufficient "
+    "or tool errors occurred. Base reasoning strictly on the provided evidence — do not "
+    "invent claims."
 )
 
 _VERIFIER_SYSTEM = (
@@ -86,7 +92,10 @@ _VERIFIER_SYSTEM = (
     "Do not reject a 'satisfied' verdict merely because the evidence does not cover every "
     "example category listed for the control, or every resource type the control could "
     "theoretically apply to — one concrete, on-point evidence item for the resource(s) "
-    "actually present is sufficient. Approve otherwise."
+    "actually present is sufficient. When the evidence contains both a concrete positive "
+    "finding and a concrete gap finding for the same control, the correct verdict is "
+    "'partial' — reject a 'satisfied' or 'gap' verdict that ignores the other side of "
+    "genuinely mixed evidence. Approve otherwise."
 )
 
 

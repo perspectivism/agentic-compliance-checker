@@ -116,7 +116,14 @@ work central.
 scikit-learn confusion matrix / `classification_report` for verdict accuracy.
 **Rejected.** (a) RAGAS alone — necessary but not sufficient for a decision output.
 (b) Verdict accuracy alone — doesn't measure whether retrieval/grounding was sound.
-**Status:** confirm after M7; see D9.
+**Status:** partially confirmed (M7). The verdict-accuracy layer is implemented
+(`src/agentic_compliance/evaluation.py`: scikit-learn confusion matrix + macro-F1 gate
+against the frozen golden set). The RAGAS grounding layer is deferred, not rejected: it
+adds an LLM-as-judge dependency with its own cost/variance, and the frozen set has only
+~15 affirmative-verdict cases to sample it over — see `docs/EVAL_PLAN.md` → "Grounding
+metrics" for how/when to add it. D9 has since confirmed this split after the first real
+eval run: the verdict-accuracy layer earned its place (macro-F1 caught a `partial`-class
+failure weighted-F1 masked entirely), and RAGAS remains deferred, not rejected.
 
 ### D8 — Golden labels: LLM-generated + spot-checked, by a *different* model
 **Context.** Hand-labeling was the original blocker; we accept "good enough, not perfect."
@@ -142,7 +149,18 @@ boundaries should sit, until you've seen real outputs.
 "v1 — revise after first run." Build the harness, run it, *read the outputs*, then tighten.
 **Rejected.** Freezing metrics/thresholds up front — locks in pre-contact guesses that an
 agent will then faithfully implement, blind spots and all.
-**Status:** revisit after first end-to-end run.
+**Status:** revisited after the first end-to-end run (M7). Metric set: macro-F1 as the
+CI gate is confirmed useful — it caught a `partial`-class failure (0/3 correct on the
+first run) that weighted-F1 masked entirely (0.90 weighted vs. 0.67 macro on the same
+run; see `docs/EVAL_PLAN.md` → "First real run results"). Rubric thresholds
+(`docs/RUBRIC.md`'s satisfied/partial/gap boundaries): the boundaries themselves needed
+no change — every failure traced to the *implementation* lagging the rubric (the
+Synthesizer/Verifier prompts had no `partial` definition; two absence findings had
+empty excerpts the LLM couldn't read), not to the rubric's own criteria being wrong.
+Current run: macro-F1 0.933 against the 0.70 gate. Left the 0.70 default as-is —
+tightening it based on a single run's number risks locking in noise the eval's own
+non-determinism could produce (`docs/TEST_PLAN.md`); revisit if a future run's margin
+above 0.70 stays this wide across repeated runs.
 
 ### D10 — Packaging: single Docker image; MCP server as a stdio subprocess
 **Context.** "Launchable from Docker" with the least operational surface.

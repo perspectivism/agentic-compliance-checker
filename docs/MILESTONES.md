@@ -286,6 +286,18 @@ Pass condition:
 - README architecture diagram.
 - Demo sample repo.
 - Optional LangSmith/OpenTelemetry integration.
+- Hygiene: hoist golden-generation logic into `src/agentic_compliance/` (e.g.
+  `golden_generation.py`); keep `scripts/generate_golden.py` as a thin wrapper
+  (not a new CLI subcommand — golden generation is dev-time dataset production,
+  not product surface). Payoff: tests import the module normally and the
+  `importlib.util.spec_from_file_location` loader in `tests/test_golden.py` goes away.
+- Hygiene: `generate_golden.py`'s `_repo_digest()` passes fixture files to the
+  labeler LLM verbatim, including label-revealing header comments (e.g. "Intended
+  GAP evidence for AC-3..."), which can bias candidate labels (does not affect the
+  runtime assessment pipeline — that only ever sees scanner-derived `EvidenceRef`
+  excerpts, confirmed during M7 review). Either strip comments in the digest or
+  move label-revealing language out of fixture source files into
+  `tests/fixtures/repos/README.md`. Bundle with the golden-generation hoist above.
 
 ### Unit tests
 - Run log is emitted.

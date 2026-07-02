@@ -94,7 +94,7 @@ Not everything can run on every build — split by cost and determinism:
 |---|---|---|---|
 | Fast lane | loader, scanners, `ToolFinding` schema validation, golden-set validation, graph routing with a **mocked** LLM | **every local build + every check-in** (CI `pytest -m "not agent"`) | fast, free, deterministic — no reason not to |
 | Golden generation | LLM produces candidate labels (`scripts/generate_golden.py`) | **occasional / manual**; review then freeze | costs tokens; output is a reviewed, committed artifact |
-| Eval suite | real LLM graph + sampled RAGAS + verdict accuracy (`@pytest.mark.agent`, `scripts/run_eval.py`) | **on-demand (manual dispatch)**; optionally on PRs touching graph/prompts/rubric; once for the README numbers | costs tokens, non-deterministic; nightly isn't worth it for a repo that isn't changing daily |
+| Eval suite | real LLM graph + verdict accuracy vs the frozen golden set (`@pytest.mark.agent`, `scripts/run_eval.py`); RAGAS grounding is a deferred optional layer (`docs/EVAL_PLAN.md`) | **on-demand (manual dispatch)**; optionally on PRs touching graph/prompts/rubric; once for the README numbers | costs tokens, non-deterministic; nightly isn't worth it for a repo that isn't changing daily |
 
 So: generated **cases are validated every check-in** (schema/shape — fast and
 deterministic); the **LLM evaluation over** those cases runs on-demand (manual), not per
@@ -110,15 +110,13 @@ Makefile targets (`make test-local`); milestone acceptance gates use a focused
 intent — do not change them to `.venv/bin/python` here.
 
 Two workflows, matching the cadence table above:
-- `ci.yml` (every push/PR): the fast lane.
+- `ci.yml` (every push/PR): the fast lane. Golden-set parsing/schema validation runs
+  here as ordinary fast-lane tests (`tests/test_golden.py`) — no separate smoke step.
   ```bash
   pytest -m "not agent"
-  python scripts/run_eval.py     # smoke: validates the golden set parses
   ```
 - `eval.yml` (on-demand / manual dispatch): the agent eval suite, gated on API-key secrets.
   ```bash
   pytest -m agent
-  python scripts/run_eval.py     # full run once M7 lands
+  python scripts/run_eval.py     # full eval: real graph vs data/golden_set.yaml; exits nonzero below the macro-F1 gate
   ```
-
-For early milestones, `run_eval.py` may use stubs, but it must not disappear.

@@ -112,12 +112,16 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
 
 def cmd_eval(args: argparse.Namespace) -> int:
-    # Implemented at M7.
-    print(
-        "[agentic-compliance] 'eval' is not yet implemented — see docs/MILESTONES.md M7.",
-        file=sys.stderr,
+    from pathlib import Path  # noqa: PLC0415
+
+    from .evaluation import run_eval  # noqa: PLC0415
+
+    return run_eval(
+        golden_path=Path(args.golden),
+        fixtures_root=Path(args.fixtures_root),
+        out_path=Path(args.out),
+        threshold=args.threshold,
     )
-    return 2
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -164,6 +168,29 @@ def build_parser() -> argparse.ArgumentParser:
     i.set_defaults(func=cmd_ingest)
 
     e = sub.add_parser("eval", help="Run the evaluation harness over the golden set.")
+    e.add_argument(
+        "--golden",
+        default="data/golden_set.yaml",
+        help="Path to the frozen golden set (default: data/golden_set.yaml).",
+    )
+    e.add_argument(
+        "--fixtures-root",
+        dest="fixtures_root",
+        default="tests/fixtures/repos",
+        help="Directory containing the fixture repos golden cases reference.",
+    )
+    e.add_argument(
+        "--out",
+        default="artifacts/eval/latest.json",
+        help="Output path for the JSON metrics report.",
+    )
+    e.add_argument(
+        "--threshold",
+        type=float,
+        default=None,
+        metavar="F1",
+        help="Macro-F1 gate; falls back to EVAL_MACRO_F1_THRESHOLD, then 0.70.",
+    )
     e.set_defaults(func=cmd_eval)
 
     return p

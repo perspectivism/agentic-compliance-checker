@@ -877,11 +877,16 @@ _CI_TOOLS: list[tuple[str, re.Pattern[str], str, str, list[str]]] = [
         ["SA-11", "SI-3"],
     ),
     (
+        # IA-5's rubric gap_evidence is hardcoded secrets in the repo itself
+        # (scan_secrets' job), not CI tooling — a missing CI secret-scanning hook
+        # is not IA-5 gap evidence. Keep this mapped to SI-12 only (outside the
+        # current 14-control rubric, like the SAST tuple's SA-11/SI-3 above) so
+        # it does not attach to any assessed control.
         "secret-scanning hook (gitleaks / detect-secrets / truffleHog)",
         re.compile(r"gitleaks|detect.secrets|trufflehog", re.IGNORECASE),
         "secret_scan_present",
         "secret_scan_missing",
-        ["IA-5", "SI-12"],
+        ["SI-12"],
     ),
     (
         "permissions declaration",

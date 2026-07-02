@@ -128,8 +128,64 @@ class TestNormalisation:
         )
         assert ref.path_or_id == "app.py"
 
+    def test_finding_with_empty_excerpt_falls_back_to_message(self):
+        """An absence finding's message becomes the excerpt — it IS the evidence."""
+        finding = ToolFinding(
+            path=".github/workflows/build.yml",
+            finding_type="container_scan_missing",
+            check_family="ci",
+            severity="medium",
+            message="No container / filesystem scanner (trivy / snyk / grype) found in CI",
+            control_hints=["SI-2", "RA-5"],
+            excerpt="",
+        )
+        ref = finding_to_evidence(finding)
+        assert ref.excerpt == finding.message
+
+    def test_finding_with_excerpt_does_not_use_message(self):
+        """A presence finding's matched text is preserved verbatim, not replaced."""
+        finding = ToolFinding(
+            path=".github/workflows/security.yml",
+            finding_type="dependency_audit_present",
+            check_family="ci",
+            severity="info",
+            message="Dependency audit tool found in CI",
+            control_hints=["SI-2", "RA-5"],
+            excerpt="run: pip-audit",
+        )
+        ref = finding_to_evidence(finding)
+        assert ref.excerpt == "run: pip-audit"
+
 
 # ── collect_evidence — fixture-backed integration tests ───────────────────────
+
+
+class TestCollectEvidenceAbsenceFindings:
+    def test_ci_absence_evidence_has_readable_excerpts(self):
+        """SI-2/RA-5 gap evidence on a no-scanner CI repo is never a blank excerpt.
+
+        Regression guard for the M7 eval failure: empty excerpts made the
+        Synthesizer unable to see gap findings at all.
+        """
+        result = collect_evidence(FIXTURES / "ci_no_security_repo", _control("SI-2/RA-5"))
+        assert result.errors == []
+        assert result.evidence, "Expected SI-2/RA-5 absence findings"
+        assert all(ref.excerpt.strip() for ref in result.evidence)
+
+    def test_ia5_on_ci_only_repo_gets_no_secret_scan_hook_evidence(self):
+        """A CI-only fixture's IA-5 collection must not pick up secret_scan_missing.
+
+        ci_no_security_repo has no hardcoded secrets and no secrets manager
+        reference — IA-5's rubric gap is hardcoded secrets, not absent CI tooling.
+        Before the control_hints fix, this control_hints leak was invisible (the
+        finding's excerpt was empty); now that finding_to_evidence fills empty
+        excerpts from the message, a mistagged finding would surface as concrete
+        (and wrong) IA-5 gap evidence for the Synthesizer.
+        """
+        result = collect_evidence(FIXTURES / "ci_no_security_repo", _control("IA-5"))
+        assert result.errors == []
+        assert result.evidence == []
+        assert result.limitations
 
 
 class TestCollectEvidenceSC8:

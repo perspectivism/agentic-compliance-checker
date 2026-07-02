@@ -31,6 +31,13 @@ FIXTURE    ?=
 
 GOLDEN_FLAGS := $(if $(FIXTURE),--fixture $(FIXTURE))
 
+# eval / eval-local: run the evaluation harness (verdict accuracy vs the frozen
+# golden set). THRESHOLD overrides the macro-F1 gate; left empty it falls through
+# to the CLI's own resolution (EVAL_MACRO_F1_THRESHOLD env var, then 0.70).
+THRESHOLD ?=
+
+THRESHOLD_FLAG := $(if $(THRESHOLD),--threshold $(THRESHOLD))
+
 help:
 	@echo "Agentic compliance checker — make targets:"
 	@echo "  Local (venv):"
@@ -49,7 +56,8 @@ help:
 	@echo "    make golden-local        Generate candidate golden-set cases in the venv (writes to"
 	@echo "                             GOLDEN_OUT=artifacts/golden_candidates.yaml; FIXTURE=<name> to"
 	@echo "                             add one fixture only — needs GOLDEN_LABEL_MODEL in .env)"
-	@echo "    make eval-local          Run the evaluation harness in the venv        [M7+]"
+	@echo "    make eval-local          Run the evaluation harness in the venv (real LLM graph vs"
+	@echo "                             the frozen golden set; optional THRESHOLD=<macro-F1 gate>)"
 	@echo "  Docker:"
 	@echo "    make build               Build the image"
 	@echo "    make test                Fast test suite  (pytest -m 'not agent')"
@@ -59,7 +67,8 @@ help:
 	@echo "                             e.g. CONTROLS=AC-6,SC-8 for explicit control selection)"
 	@echo "    make golden              Generate candidate golden-set cases (writes inside the"
 	@echo "                             artifacts volume; use export-artifacts to copy it out)"
-	@echo "    make eval                Run the evaluation harness          [M7+]"
+	@echo "    make eval                Run the evaluation harness (writes inside the artifacts"
+	@echo "                             volume; optional THRESHOLD=<macro-F1 gate>)"
 	@echo "    make shell               Open a bash shell in the container"
 	@echo "    make lint                Lint + format-check with ruff"
 	@echo "    make export-artifacts    Copy Docker's artifacts volume to ./artifacts/docker on the"
@@ -88,12 +97,11 @@ format:
 test-local:
 	$(PYTHON) -m pytest -m "not agent" -q
 
-# Full suite in the venv. Currently free: no test today calls the real chat
-# model — the @pytest.mark.agent tests either need no model (MCP import
-# checks) or use local embeddings (EMBEDDINGS_MODEL=local, the default). This
-# reflects the current test suite, not a guarantee — a future agent-marked
-# test, or switching EMBEDDINGS_MODEL to an API-backed provider, could change
-# that.
+# Full suite in the venv. Mostly free — the @pytest.mark.agent tests largely
+# need no model (MCP import checks) or use local embeddings (EMBEDDINGS_MODEL=
+# local, the default). The one exception: test_eval.py's live-eval test makes a
+# handful of real chat-model calls when CHAT_MODEL is configured in .env, and
+# skips cleanly when it isn't.
 test-all-local:
 	$(PYTHON) -m pytest -q
 
@@ -128,7 +136,7 @@ golden-local:
 	$(PYTHON) scripts/generate_golden.py --out $(GOLDEN_OUT) $(GOLDEN_FLAGS)
 
 eval-local:
-	$(PYTHON) scripts/run_eval.py
+	$(PYTHON) scripts/run_eval.py $(THRESHOLD_FLAG)
 
 # --- Docker ---
 # All compose services use the same Dockerfile and publish the same local image tag.
@@ -163,7 +171,7 @@ golden: build
 		--out $(GOLDEN_OUT) $(GOLDEN_FLAGS)
 
 eval: build
-	docker compose run --rm app eval
+	docker compose run --rm app eval $(THRESHOLD_FLAG)
 
 shell: build
 	docker compose run --rm --entrypoint bash app

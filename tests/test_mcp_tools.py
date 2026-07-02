@@ -600,6 +600,17 @@ class TestScanCISecurity:
         findings = scan_ci_security(FIXTURES / "ci_no_security_repo")
         assert any(f.finding_type == "secret_scan_missing" for f in findings)
 
+    def test_missing_secret_scan_hook_is_not_tagged_ia5(self):
+        """secret_scan_missing must not carry IA-5 — that control's rubric gap is
+        hardcoded secrets in the repo (scan_secrets' job), not absent CI tooling.
+        Mistagging this let a CI-only fixture's IA-5 not_assessable golden label
+        silently earn 'gap' evidence it isn't entitled to (caught in M7 eval review).
+        """
+        findings = scan_ci_security(FIXTURES / "ci_no_security_repo")
+        missing = [f for f in findings if f.finding_type == "secret_scan_missing"]
+        assert missing, "expected at least one secret_scan_missing finding"
+        assert all("IA-5" not in f.control_hints for f in missing)
+
     def test_flags_missing_permissions_declaration(self):
         """scan_ci_security flags missing permissions: in workflow files."""
         # ci_scanning_repo has no permissions: declaration
