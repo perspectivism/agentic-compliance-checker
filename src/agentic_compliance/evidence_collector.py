@@ -8,10 +8,10 @@ Public API:
 
 Design constraints:
 - Calls only deterministic MCP tools; no LLM and no direct filesystem access.
-- Does NOT draft verdicts — verdict classes are M5's responsibility.
+- Does NOT draft verdicts — verdict classes are the graph's responsibility.
 - On any tool error or timeout, records the failure in CollectionResult.errors
-  (fail-closed: M5 treats a non-empty errors list as grounds for not_assessable).
-- "No relevant evidence found" goes in limitations, not errors, so M5 can
+  (fail-closed: the graph treats a non-empty errors list as grounds for not_assessable).
+- "No relevant evidence found" goes in limitations, not errors, so the graph can
   distinguish a clean run-and-found-nothing from a tool failure.
 - Filters findings by check_family (tool routing) AND control_hints (relevance) so
   only evidence mapped to the current control reaches the Synthesizer.
@@ -135,8 +135,9 @@ def finding_to_evidence(finding: ToolFinding) -> EvidenceRef:
     Absence findings (e.g. container_scan_missing) have no matched text, so their
     excerpt is empty — for those, the finding's message IS the evidence. Without
     this fallback the Synthesizer sees a bare file path with no content and cannot
-    tell a gap finding from nothing (M7 eval showed it then either degrades a real
-    gap to not_assessable or, worse, overclaims satisfied on mixed evidence).
+    tell a gap finding from nothing (the first evaluation runs showed it then either
+    degrades a real gap to not_assessable or, worse, overclaims satisfied on mixed
+    evidence — see docs/EVAL_PLAN.md "First real run results").
     """
     return EvidenceRef(
         source_type="tool_result",

@@ -1,8 +1,19 @@
 # Architecture
 
-> **Living architecture doc.** The core topology is stable. Component descriptions and
-> diagrams update as milestones are implemented — node contracts, state shape, and tool
-> schemas fill in as each milestone lands.
+Components, trust boundaries, and the deterministic-vs-LLM split. For a single
+assessment traced end-to-end — the object produced at every step — see
+[EXECUTION_FLOW.md](EXECUTION_FLOW.md); for security boundaries and mitigations, see
+[THREAT_MODEL.md](THREAT_MODEL.md).
+
+## Contents
+
+- [Core design choice](#core-design-choice)
+- [Components](#components)
+- [Control flow (the verifier loop)](#control-flow-the-verifier-loop)
+- [LangGraph](#langgraph)
+- [Scanner tools and the MCP server](#scanner-tools-and-the-mcp-server)
+- [RAG store](#rag-store)
+- [Observability](#observability)
 
 ## Core design choice
 
@@ -29,25 +40,26 @@ flowchart TD
     subgraph GRAPH [assessment graph]
         SUPERVISOR[Supervisor<br/>routing · control_idx · stop condition]
 
-        SUPERVISOR -->|collect evidence| COLLECTOR[Evidence Collector<br/>deterministic MCP tools]
-        COLLECTOR -. stdio .-> MCP[[MCP server<br/>read + scan tools · read-only]]
+        SUPERVISOR -->|collect evidence| COLLECTOR[Evidence Collector<br/>deterministic · no LLM]
+        COLLECTOR -->|calls| SCANNERS[[read-only scanner tools<br/>also served over MCP · stdio]]
 
         COLLECTOR -->|synthesize| SYNTH[Synthesizer<br/>LLM · structured verdict]
         SYNTH -->|verify| VERIFIER{Verifier · LLM<br/>claim backed by evidence?}
 
-        VERIFIER -->|approved or cap reached| FINALIZE[FinalizeControl<br/>commit · downgrade if exhausted]
+        VERIFIER -->|approved or cap reached| FINALIZE[FinalizeControl<br/>commit · fail-closed guards]
         FINALIZE -->|"advance to next control"| SUPERVISOR
         VERIFIER -->|"rejected · retries remain"| SYNTH
     end
 
-    SUPERVISOR -->|all controls assessed| FINAL([FinalReport + audit log])
+    SUPERVISOR -->|all controls assessed| FINAL([FinalReport + JSONL run log])
 
-    MCP -->|read-only| REPO
+    SCANNERS -->|read-only| REPO
 ```
 
 The two data sources are kept on opposite sides of a trust boundary: the **controls
-KB is trusted**, the **target repo is untrusted**. The MCP server is the only layer
-permitted to read repository files, and it returns structured fields, not raw dumps.
+KB is trusted**, the **target repo is untrusted**. The scanner tool layer is the only
+code permitted to read repository files, and it returns structured fields, not raw
+dumps.
 
 ## Control flow (the verifier loop)
 
@@ -92,14 +104,20 @@ conditional edges. LLM nodes (Synthesizer, Verifier) use `init_chat_model` +
 node — all control flow is in conditional edge functions. See typed state in
 [`docs/SPEC.md`](SPEC.md).
 
-## MCP server
+## Scanner tools and the MCP server
 
-Bounded, read-only tools. The initial tool surface is `list_repo_files`, `read_file_slice`,
-`scan_secrets`, `scan_iac_security`, and `scan_ci_security`. Scanner tools return structured
-`ToolFinding` records; the Evidence Collector normalizes these into `EvidenceRef` entries
-before the Synthesizer reasons over them. Recommended transport for local v1 is **stdio**
-(spawned as a subprocess by `langchain-mcp-adapters` inside the same container).
-`streamable-http` is the option if it's ever deployed as a separate service.
+Five bounded, read-only tools: `list_repo_files`, `read_file_slice`, `scan_secrets`,
+`scan_iac_security`, and `scan_ci_security` ([`tools.py`](../src/agentic_compliance/tools.py)).
+Scanner tools return structured `ToolFinding` records; the Evidence Collector
+normalizes these into `EvidenceRef` entries before the Synthesizer reasons over them.
+None makes a network call; none executes repository content.
+
+The tools have two access surfaces with identical behavior: the assessment path calls
+them **in-process** (plain Python imports in [`evidence_collector.py`](../src/agentic_compliance/evidence_collector.py) — no protocol hop
+inside a single-process CLI run), and a FastMCP server
+([`mcp_server.py`](../src/agentic_compliance/mcp_server.py), **stdio** transport) exposes the same five
+functions to external MCP clients. `streamable-http` is the transport option if the
+server is ever deployed as a separate service.
 
 ## RAG store
 
@@ -133,19 +151,32 @@ deterministic fake embeddings; no FAISS, no network.
 
 Retrieval is **hybrid**: semantic over the control text (Chroma, for selection), deterministic/structured over the repo (regex/AST via MCP tools, for evidence). Embedding
 Terraform files and hoping for a match is *not* how repo evidence is found — see
-[`docs/DECISIONS.md`](DECISIONS.md) D2.
+[DECISIONS.md D2](DECISIONS.md#d2--hybrid-rag-semantic-over-controls-deterministic-over-the-repo).
 
 **Embeddings are a separate model type from the chat model.** The chat model is freely
 swappable (LangChain `init_chat_model`), but switching chat providers doesn't supply an
 embedding model, and Anthropic doesn't offer one (Voyage AI is their recommendation).
-Default to a local, no-API-key embedding model (FastEmbed/onnx or sentence-transformers)
-so only one cloud key is needed; OpenAI `text-embedding-3-small` is the alternative.
-Changing the embedding model means re-running `ingest-controls` — vectors from different
-models aren't comparable, so the KB must be rebuilt.
+The default is a local, no-API-key embedding model (`EMBEDDINGS_MODEL=local` →
+all-MiniLM-L6-v2 via sentence-transformers) so only one cloud key is needed; OpenAI
+`text-embedding-3-small` is the configured alternative. Changing the embedding model
+means re-running `ingest-controls` — vectors from different models aren't comparable,
+so the KB must be rebuilt.
 
 ## Observability
 
-Capture per run: request ID, selected controls, node timings, tool calls, verifier
-attempts, final verdicts, token/cost estimates when available, and errors. Minimum v1
-is structured JSONL logs; LangSmith traces or OpenTelemetry/Phoenix are the upgrade.
-Secret values are masked/hashed before they ever reach a log or report.
+Every assessment run through `run_assessment()` (the CLI's `assess` subcommand and
+any default-configured programmatic caller) writes a structured JSONL log to
+`artifacts/runs/<run_id>.jsonl` ([`run_log.py`](../src/agentic_compliance/run_log.py)). The
+module-level `graph` used by `langgraph dev`/Studio defaults to a no-op logger
+instead, so the dev server doesn't accumulate a log file per hot-reload — both
+paths accept an explicit `logger=` override. Logged events: node start/end with
+timing, one `tool_call`
+event per control (scanner families run, finding/error/limitation counts), one
+`verifier_attempt` per verifier call (approved/rejected, whether notes were left),
+and one `verdict_finalized` per control. Every field is structural — control IDs,
+tool names, counts, durations, verdict labels — never a raw evidence excerpt, repo
+file content, or the verifier's freeform rationale text; those already live in the
+`FinalReport` instead. This is enforced by construction, not by redacting after the
+fact: the logging call sites simply never receive evidence content to begin with.
+LangSmith traces or OpenTelemetry/Phoenix remain a possible upgrade, not required
+for a reviewer to inspect what a run did.

@@ -74,10 +74,10 @@ class EvidenceRef(BaseModel):
 class CollectionResult(BaseModel):
     """Output of one Evidence Collector run for a single control.
 
-    errors and limitations are kept separate so M5 can distinguish a tool
+    errors and limitations are kept separate so the graph can distinguish a tool
     failure (→ not_assessable) from a clean run that found nothing (→ gap or
     not_assessable depending on control type). Neither field produces a verdict
-    directly — that is M5's responsibility.
+    directly — that is the graph's responsibility.
     """
 
     control_id: str
@@ -168,12 +168,12 @@ class SelectionResult(BaseModel):
 
 
 class GoldenCase(BaseModel):
-    """One labeled example in the golden evaluation set (M6/M7).
+    """One labeled example in the golden evaluation set.
 
     Candidates are produced by scripts/generate_golden.py using a labeler model
     different from the agent's own CHAT_MODEL (docs/DECISIONS.md D8), then
     hand-reviewed. Only human_verified=True cases count as ground truth for the
-    M7 evaluation harness — unverified candidates are provisional labels, not
+    evaluation harness — unverified candidates are provisional labels, not
     assertions about correct behavior.
     """
 

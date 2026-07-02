@@ -164,8 +164,9 @@ class TestCollectEvidenceAbsenceFindings:
     def test_ci_absence_evidence_has_readable_excerpts(self):
         """SI-2/RA-5 gap evidence on a no-scanner CI repo is never a blank excerpt.
 
-        Regression guard for the M7 eval failure: empty excerpts made the
-        Synthesizer unable to see gap findings at all.
+        Regression guard for a real evaluation-run failure: empty excerpts made
+        the Synthesizer unable to see gap findings at all (docs/EVAL_PLAN.md,
+        "First real run results").
         """
         result = collect_evidence(FIXTURES / "ci_no_security_repo", _control("SI-2/RA-5"))
         assert result.errors == []

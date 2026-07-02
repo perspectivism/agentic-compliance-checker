@@ -1,4 +1,4 @@
-"""Evaluation harness (M7): verdict accuracy of the graph against the frozen golden set.
+"""Evaluation harness: verdict accuracy of the graph against the frozen golden set.
 
 Loads `data/golden_set.yaml`, runs the assessment graph once per fixture repo using
 explicit control selection (exactly the controls that fixture's verified cases name —
@@ -8,8 +8,8 @@ matching the schema in docs/EVAL_PLAN.md.
 
 Grounding metrics (RAGAS) are the optional second evaluation layer (docs/DECISIONS.md
 D7) and are deliberately not implemented here: they add an LLM-as-judge dependency
-with its own cost/variance, and verdict accuracy is the layer the milestone gate
-requires. See docs/EVAL_PLAN.md → "Grounding metrics".
+with its own cost/variance, and verdict accuracy is the required layer. See
+docs/EVAL_PLAN.md → "Grounding metrics".
 
 Fail-safe behavior:
 - Only human_verified cases count as ground truth (docs/DECISIONS.md D8).
@@ -38,7 +38,7 @@ from .schemas import FinalReport, GoldenCase, VerdictClass
 # are stable across runs regardless of which classes appear in a given golden set.
 LABELS: list[str] = [v.value for v in VerdictClass]
 
-DEFAULT_THRESHOLD = 0.70  # docs/EVAL_PLAN.md: macro F1 >= 0.70 once M7 is complete
+DEFAULT_THRESHOLD = 0.70  # docs/EVAL_PLAN.md: the default macro-F1 quality gate
 
 # assess_fn contract: (fixture repo root, control IDs to assess) -> FinalReport.
 # Injectable so the deterministic fast-lane tests never touch the real graph/LLM.

@@ -1,13 +1,13 @@
-"""Golden evaluation set: schema validation/loading (M6) and the candidate generator."""
+"""Golden evaluation set: schema validation/loading and the candidate generator."""
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
 import pytest
 import yaml
 
+from agentic_compliance import golden_generation
 from agentic_compliance.golden import (
     GoldenSetError,
     class_coverage,
@@ -21,25 +21,6 @@ from agentic_compliance.schemas import GoldenCase, VerdictClass
 _STUB_PATH = Path(__file__).parent.parent / "data" / "golden_set_stub.yaml"
 _FROZEN_PATH = Path(__file__).parent.parent / "data" / "golden_set.yaml"
 _CONTROLS_PATH = Path(__file__).parent.parent / "data" / "controls.yaml"
-_SCRIPT_PATH = Path(__file__).parent.parent / "scripts" / "generate_golden.py"
-
-
-def _load_script_module():
-    """Load scripts/generate_golden.py by path — it's a standalone CLI, not a package.
-
-    Must register in sys.modules before exec_module: Pydantic resolves the
-    `from __future__ import annotations` string annotation on _LabelCandidate via
-    sys.modules[cls.__module__], so without this the class is left "not fully
-    defined" and construction fails.
-    """
-    import sys
-
-    spec = importlib.util.spec_from_file_location("generate_golden", _SCRIPT_PATH)
-    assert spec is not None and spec.loader is not None, f"could not load spec for {_SCRIPT_PATH}"
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def _case(
@@ -65,7 +46,7 @@ def _case(
     )
 
 
-# ── Loader (M6 required tests) ──────────────────────────────────────────────────
+# ── Loader ─────────────────────────────────────────────────────────────────────
 
 
 class TestGoldenLoader:
@@ -149,18 +130,18 @@ class TestClassCoverage:
 
 
 class TestFrozenGoldenSet:
-    """M6: the frozen data/golden_set.yaml meets the v1 minimum size/coverage bar.
+    """The frozen data/golden_set.yaml meets the v1 minimum size/coverage bar.
 
-    Skips cleanly until the real generate_golden.py run + human spot-check produces
+    Skips cleanly until a real generate_golden.py run + human spot-check produces
     data/golden_set.yaml (a deliberate, occasional data-production step — not part of
-    every check-in; see docs/MILESTONES.md M6 and docs/TEST_PLAN.md).
+    every check-in; see docs/EVAL_PLAN.md "Golden generation workflow").
     """
 
     def test_meets_minimum_size_and_coverage(self):
         if not _FROZEN_PATH.exists():
             pytest.skip(
                 "data/golden_set.yaml not generated yet — run scripts/generate_golden.py "
-                "and spot-check before this check applies (docs/MILESTONES.md M6)."
+                "and spot-check before this check applies (docs/EVAL_PLAN.md)."
             )
         cases = load_golden_cases(_FROZEN_PATH)
         verified = verified_cases(cases)
@@ -178,7 +159,7 @@ class TestFrozenGoldenSet:
 
 @pytest.fixture(scope="module")
 def _script():
-    return _load_script_module()
+    return golden_generation
 
 
 @pytest.fixture(scope="module")
@@ -331,6 +312,44 @@ class TestMergeRegeneratedCases:
         new_case = _case(id="a")
         merged = _script._merge_regenerated_cases(out, [new_case], {"secure_terraform_app"})
         assert merged == [new_case]
+
+
+class TestStripCommentLines:
+    """_strip_comment_lines() keeps the labeler from reading fixture header comments
+
+    that describe the intended verdict (e.g. "Intended GAP evidence for AC-3...") —
+    that would hand the labeler the answer instead of letting it reason from evidence.
+    """
+
+    def test_strips_whole_line_comments(self, _script):
+        content = (
+            "# Intended GAP evidence for AC-3\n"
+            'resource "aws_security_group" "open_ssh" {\n'
+            '  cidr_blocks = ["0.0.0.0/0"]\n'
+            "}\n"
+        )
+        stripped = _script._strip_comment_lines(content)
+        assert "Intended GAP evidence" not in stripped
+        assert "cidr_blocks" in stripped
+
+    def test_indented_comment_lines_are_stripped(self, _script):
+        content = "  # nested comment\ncode_line_here\n"
+        stripped = _script._strip_comment_lines(content)
+        assert "nested comment" not in stripped
+        assert "code_line_here" in stripped
+
+    def test_no_comments_leaves_code_lines_intact(self, _script):
+        """No comment lines present -> every code line survives unchanged."""
+        content = 'resource "aws_s3_bucket" "data" {}\nresource "aws_vpc" "main" {}'
+        assert _script._strip_comment_lines(content) == content
+
+    def test_repo_digest_excludes_fixture_header_comment(self, _script):
+        """End-to-end: a real fixture's own header comment never reaches the digest."""
+        digest = _script._repo_digest(
+            Path(__file__).parent / "fixtures" / "repos" / "insecure_terraform_app"
+        )
+        assert "Intended GAP evidence" not in digest
+        assert "cidr_blocks" in digest
 
 
 class TestGenerateCandidates:

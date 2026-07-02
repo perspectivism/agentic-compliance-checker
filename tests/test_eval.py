@@ -1,4 +1,4 @@
-"""Tests for the M7 evaluation harness (src/agentic_compliance/evaluation.py).
+"""Tests for the evaluation harness (src/agentic_compliance/evaluation.py).
 
 The fast-lane tests inject a fake assess function so no LLM, network, or KB is
 involved — they exercise grouping, scoring, gating, fail-safe error handling, and

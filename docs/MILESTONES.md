@@ -163,7 +163,8 @@ make test-local
 Pass condition:
 - graph cannot loop forever.
 - unsupported claims are not silently accepted.
-- Studio renders the graph (capture a screenshot for the README).
+- Studio renders the graph (visual confirmation during development; no README
+  screenshot required).
 
 ---
 
@@ -283,7 +284,8 @@ Pass condition:
 - Node timing.
 - Tool-call log.
 - Verifier-attempt log.
-- README architecture diagram.
+- README architecture diagram (text/mermaid, already in `docs/ARCHITECTURE.md` —
+  keep current with any node/state changes; no Studio screenshot needed).
 - Demo sample repo.
 - Optional LangSmith/OpenTelemetry integration.
 - Hygiene: hoist golden-generation logic into `src/agentic_compliance/` (e.g.

@@ -93,6 +93,9 @@ def cmd_assess(args: argparse.Namespace) -> int:
         out_path.write_text("\n".join(lines))
 
     print(f"[agentic-compliance] Report written to {out_path}", flush=True)
+    run_id = report.audit.get("run_id")
+    if run_id:
+        print(f"[agentic-compliance] Run log: artifacts/runs/{run_id}.jsonl", flush=True)
     return 0
 
 

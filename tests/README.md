@@ -1,6 +1,6 @@
 # Tests
 
-Tests should be added milestone-by-milestone.
+One test module per component, plus fixture repositories under `fixtures/repos/`.
 
 Required files:
 - `test_scaffold.py`     (import/CLI canary — keeps the suite green from day one)
@@ -11,7 +11,7 @@ Required files:
 - `test_graph.py`
 - `test_golden.py`       (schema/shape validation — fast lane, every check-in)
 - `test_eval.py`
-- `test_observability.py`
+- `test_run_log.py`
 
 Mark tests that need a live model/network with `@pytest.mark.agent`; the CI fast lane
 runs `pytest -m "not agent"` directly (no Docker/Make involved in CI itself). Reproduce

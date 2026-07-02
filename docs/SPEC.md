@@ -1,9 +1,8 @@
 # Specification: Agentic Compliance Reference Implementation
 
-> **Living specification.** This is the target contract for v1. It should evolve only
-> when implementation or milestone tests prove the contract incomplete, unsafe, or
-> inaccurate. Do not change it to match aspirational behavior — change it to match
-> proven behavior.
+The system contract: schemas, tools, node responsibilities, and security requirements.
+Change this document only to match proven behavior — never to match aspirational
+behavior.
 
 ## Problem statement
 
@@ -277,16 +276,17 @@ and secret-scanning hooks. Also flags workflows with overly broad permissions or
 10. **Validate the repo URL before cloning.** Allow only `https` to permitted forge hosts; reject `file://`, `ext::`, `ssh://`, `git://`, scp-like `git@` syntax, and internal/private/loopback addresses.
 11. **Egress allowlist.** The only outbound network calls are the clone and the model/embeddings API; analysis tools perform no network I/O.
 
-## Held open until the first real run (resolve at M7)
+## Resolved evaluation decisions
 
-Two parts of this spec are intentionally provisional and should be revised after the
-first end-to-end run at M7, not frozen now (see `docs/DECISIONS.md` D9):
-- **Eval-metric selection** — which grounding/verdict metrics actually distinguish
-  good from bad is learned by reading real outputs.
-- **Rubric thresholds** — the satisfied/partial/gap boundaries per control will be
-  tuned once real repos surface ambiguous cases.
-
-Build the harness and rubric to v1, run it, inspect outputs, then tighten.
+Two parts of this spec were intentionally held provisional until the first end-to-end
+evaluation run; both are now resolved (see
+[DECISIONS.md](DECISIONS.md#d9--evaluation-metrics-and-rubric-thresholds-resolved-after-the-first-real-run)
+D9 and [EVAL_PLAN.md](EVAL_PLAN.md#first-real-run-results)):
+- **Eval-metric selection** — macro-F1 is confirmed as the quality gate; it caught a
+  minority-class failure that weighted-F1 masked entirely.
+- **Rubric thresholds** — the satisfied/partial/gap boundaries required no change;
+  every observed failure traced to the implementation lagging the rubric, not to the
+  rubric's criteria being wrong.
 
 ## Acceptance criteria
 

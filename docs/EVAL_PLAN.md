@@ -1,9 +1,21 @@
 # Evaluation Plan
 
-> **Living evaluation plan.** The first end-to-end eval run has now happened (see
-> "First real run results" below) — the metric set and gate mechanics are confirmed.
-> Grounding metrics (RAGAS) remain an open, deferred question; update this doc again
-> if that changes, or if a future run's failure pattern warrants a threshold change.
+How assessment quality is defined, measured, and gated: the golden dataset, the
+verdict-accuracy metrics, the measured results, and the deferred grounding layer.
+
+## Contents
+
+- [Why evaluation matters](#why-evaluation-matters)
+- [Golden dataset](#golden-dataset)
+- [Verdict metrics](#verdict-metrics)
+  - [Running the evaluation](#running-the-evaluation)
+  - [Reading the metrics](#reading-the-metrics)
+  - [First real run results](#first-real-run-results)
+  - [Baseline comparison (ablation)](#baseline-comparison-ablation)
+- [Grounding metrics](#grounding-metrics)
+- [Agent-specific metrics](#agent-specific-metrics)
+- [Evaluation output](#evaluation-output)
+- [Human review](#human-review)
 
 ## Why evaluation matters
 
@@ -17,9 +29,9 @@ This project evaluates two different layers:
 ## Golden dataset
 
 `data/golden_set_stub.yaml` is the committed starting point. The full labeled set is
-**generated and frozen in M6** as `data/golden_set.yaml` (different-model labels,
-spot-checked) and consumed here in M7. Run the eval against the frozen set rather than
-regenerating labels each time.
+**generated and frozen** as `data/golden_set.yaml` (different-model labels,
+spot-checked) and consumed by the evaluation harness. Run the eval against the frozen
+set rather than regenerating labels each time.
 
 Each row contains:
 - fixture repo,
@@ -29,13 +41,13 @@ Each row contains:
 - expected evidence hints,
 - whether human-verified.
 
-As of M6, `data/golden_set.yaml` is frozen: 54 cases, all `human_verified: true`,
+The frozen `data/golden_set.yaml` contains 54 cases, all `human_verified: true`,
 distribution `satisfied: 5, partial: 3, gap: 7, not_assessable: 39` — every class
 clears the ≥3 minimum. A few candidates were corrected post-generation for reasons
 beyond subjective spot-check: some controls (e.g. `CM-3`, `SI-4`, `SC-12`) have no
 scanner support anywhere in `tools.py`, so no verdict but `not_assessable` is
 achievable by the real pipeline regardless of what the labeler concluded from reading
-the fixture directly. A separate M7 audit re-derived all 54 labels directly from
+the fixture directly. A separate audit re-derived all 54 labels directly from
 scanner output (independent of the labeler's own reasoning) and confirmed all 54 are
 consistent with what the deterministic tools actually produce.
 
@@ -51,14 +63,14 @@ cp artifacts/golden_candidates.yaml data/golden_set.yaml # after reviewing and s
 ```
 
 Requires `GOLDEN_LABEL_MODEL` set in `.env` to a model different from `CHAT_MODEL`
-(`docs/DECISIONS.md` D8) — the generator refuses to run otherwise.
+([DECISIONS.md D8](DECISIONS.md#d8--golden-labels-llm-generated--spot-checked-by-a-different-model)) — the generator refuses to run otherwise.
 
 Lifecycle:
 - `artifacts/golden_candidates.yaml` — generated, unreviewed workspace (gitignored,
   never committed).
 - `data/golden_set.yaml` — reviewed, frozen, committed ground truth.
-- `human_verified: true` is the only thing M7 counts as ground truth — an unverified
-  candidate is a provisional label, not an assertion of correctness.
+- `human_verified: true` is the only thing the harness counts as ground truth — an
+  unverified candidate is a provisional label, not an assertion of correctness.
 
 ## Verdict metrics
 
@@ -132,11 +144,11 @@ Which numbers matter most for *this* system:
   broken. The first real run showed the gap concretely: weighted-F1 0.90 while
   `partial` F1 was 0.00 and macro-F1 (0.67) correctly failed the gate.
 
-The confusion matrix (rows = truth, columns = prediction, in `labels` order) tells
-you *where* the misses went; `failures[]` carries each miss's predicted-verdict
-rationale so you can tell a prompt problem from an evidence problem — check whether
-the rationale is reasoning badly about evidence it had, or reasoning correctly about
-evidence it never got.
+The confusion matrix (rows = truth, columns = prediction, in `labels` order) shows
+*where* the misses went; `failures[]` carries each miss's predicted-verdict rationale,
+which distinguishes a prompt problem from an evidence problem — check whether the
+rationale reasons badly about evidence it had, or reasons correctly about evidence it
+never received.
 
 ### First real run results
 
@@ -162,6 +174,53 @@ overclaims) and `gap` recall is 1.0 (no missed gaps) — both of the failure dir
 the fail-safe design most needs to prevent are clean on this run. The one open gap is
 entirely within `partial` recall, the least safety-critical of the four cells.
 
+### Baseline comparison (ablation)
+
+"0.933 compared to what?" — an ablation answers it. `scripts/ablation_naive.py` runs
+the **same chat model** on the **same 54 golden cases** with the architecture removed:
+no deterministic scanners, no verifier loop, no fail-closed guards. One LLM call per
+(fixture, control) — raw repository text (comments included, using the same bounded
+read budgets as golden generation) plus the control rubric in, verdict out. Scored by
+the same harness, so the numbers are directly comparable:
+
+```bash
+.venv/bin/python scripts/ablation_naive.py   # manual, occasional; 54 real model calls
+```
+
+| | Naive single-prompt baseline | Full pipeline |
+|---|---|---|
+| macro-F1 | 0.794 | **0.933** |
+| weighted-F1 | 0.811 | **0.980** |
+| failures | 12 | **1** |
+| `gap` precision | 0.37 | **0.875** |
+
+The failure pattern matters more than the score gap. All 12 baseline errors are the
+**same** error: falsely asserting `gap` — eleven `not_assessable` cases and one
+`partial` case. Of the baseline's 19 total deficiency findings, 12 were
+unsupportable: reading raw repository text, the model concludes "no CloudTrail
+configured → audit-logging gap" on a repository whose only file is a README. The
+pipeline's evidence-gated verdicts and fail-closed guards make that class of claim
+structurally impossible: all eleven evidence-free `gap` assertions disappear, and
+every `gap` the pipeline reports carries file/line evidence. Its one remaining
+`gap` false positive (precision 0.875, 7 of 8) is a different kind of error — the
+mixed-evidence `partial_network_app` × AC-3 case, where real gap evidence exists
+alongside real positive evidence and the pipeline weighed it as `gap`. The
+baseline made the same miss on that case; it is a severity-judgment error, not an
+unsupported claim, and it is the pipeline's only failure of any kind.
+
+Two honest caveats, recorded so the comparison is never oversold:
+- **The baseline is respectable** — 0.794 clears this project's own 0.70 gate. A
+  frontier model with the rubric in-prompt is genuinely capable at this task; the
+  architecture's measured value is concentrated in unsupported-deficiency
+  elimination, not in general competence the model lacks.
+- **The baseline never falsely claimed `satisfied`** (and the
+  `prompt_injection_repo` payload did not flip it to `satisfied` either) — the model
+  is naturally cautious about positive claims and loose about negative ones. The
+  scaffolding's contribution shows up in the `gap` column.
+
+Numbers are from a single run of a non-deterministic system (same caveat as the
+pipeline's own results); the report is written to `artifacts/eval/ablation_naive.json`.
+
 ## Grounding metrics
 
 Optional but valuable:
@@ -173,13 +232,15 @@ Optional but valuable:
 Caveat:
 RAGAS metrics are LLM-as-judge and can vary. Pin the judge model and sample runs.
 
-Status (M7): **deferred — not implemented in the v1 harness.** Verdict accuracy is the
+Status: **deferred — not implemented in the v1 harness.** Verdict accuracy is the
 required layer; RAGAS adds a judge-model dependency with its own cost and variance, and
 with only ~15 non-`not_assessable` cases in the frozen set, sampled grounding scores
 risk more noise than signal. If added later, sample it over affirmative verdicts only
 (`not_assessable` has no answer to check faithfulness against) as a separate pass, not
 bundled into the macro-F1 gate. The `ragas` dependency stays provisioned in the
-`[agent]` extra. See `docs/DECISIONS.md` D7.
+dedicated `[grounding]` extra — declared but not installed by default, keeping an
+unused package out of the runtime image and the default dependency-audit surface.
+See [DECISIONS.md D7](DECISIONS.md#d7--evaluation-two-layers-grounding--verdict-accuracy).
 
 ## Agent-specific metrics
 
@@ -193,9 +254,10 @@ Track:
 - latency per node,
 - total run latency.
 
-The verifier metrics ship in the M7 report's `verifier_stats` (aggregated from each
-run's `ControlVerdict` records). Tool-call counts and per-node latency need the M8
-observability layer (run/tool logs) and are added there.
+The verifier metrics ship in the eval report's `verifier_stats` (aggregated from each
+run's `ControlVerdict` records). Node timing and per-control tool activity are
+recorded in the JSONL run log (`artifacts/runs/<run_id>.jsonl`) each assessment
+writes — see the Observability section of [ARCHITECTURE.md](ARCHITECTURE.md#observability).
 
 ## Evaluation output
 
@@ -228,12 +290,15 @@ expected/predicted/rationale, not just the failures) for full auditability.
 ## Human review
 
 Use LLM-generated labels only as candidates, then freeze a verified subset:
-- **Generate labels with a different model than the one the agent runs**, so you're not
-  grading a model against its own opinion.
-- Spot-check ~20–30% by hand; fix disagreements; freeze the verified set as ground truth.
+- **Generate labels with a different model than the one the agent runs**, so the
+  system is never graded against its own model's opinion.
+- Review by hand before freezing. Spot-checking ~20–30% is the floor for future
+  expansions; the v1 54-case set exceeded it — every case was reviewed and marked
+  `human_verified: true`, and an independent audit re-derived all 54 labels from
+  scanner output. Only the cases actually verified may be frozen as ground truth.
 - Report results as **indicative, not certified** — the labels carry the labeler model's
-  errors (see `docs/DECISIONS.md` D8).
+  errors (see [DECISIONS.md D8](DECISIONS.md#d8--golden-labels-llm-generated--spot-checked-by-a-different-model)).
 
-Minimum for v1:
+Minimum for v1 (met by the frozen set):
 - 20 to 40 labeled examples.
 - At least 3 examples per verdict class when possible.

@@ -27,3 +27,15 @@ A symlink that escapes the repo root does not round-trip portably through a zip,
 and its target is environment-specific. Create it inside the test (e.g. with
 `tmp_path` and `os.symlink(tmp_path.parent / "secret", repo / "escape")`) and
 assert the loader rejects/skips it. See `docs/TEST_PLAN.md`.
+
+## Comment style in fixture source files
+Header comments describing a fixture's intended verdict/control (e.g. "Intended GAP
+evidence for AC-3...") are useful for a human reading the file, but golden-set
+generation (`scripts/generate_golden.py`) reads fixture content verbatim to prompt
+the labeler model — so that same text can hand the labeler the answer instead of
+letting it reason from evidence. `golden_generation._strip_comment_lines()` filters
+these out before they reach the labeler, but it only strips whole-line `#` comments;
+it does not handle block comments (e.g. Terraform's `/* ... */`). Prefer `#` line
+comments for this kind of explanatory header, and keep in mind golden labels are
+human-reviewed regardless (`docs/DECISIONS.md` D8) — that review is the real
+backstop, not the stripper.

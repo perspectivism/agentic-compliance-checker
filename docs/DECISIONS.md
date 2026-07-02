@@ -69,15 +69,22 @@ resource-type boost and never appeared in any fixture's top-k, which meant no fi
 could produce a `partial` verdict (`docs/RUBRIC.md`'s only explicit "partial if only
 some tiers protected" control was structurally unreachable).
 
-### D3 — Tools exposed over a self-built MCP server (not in-process functions)
+### D3 — Scanner tools: pure functions plus a FastMCP surface
 **Context.** The agent needs read-only repo-inspection tools; control lookup is handled by RAG over the controls KB, not an MCP tool.
-**Decision.** Serve them from a FastMCP server, consumed via `langchain-mcp-adapters`.
-**Rejected.** Plain in-process `@tool` functions — which would work identically for a
-single-process POC. **Honest note:** MCP is *not strictly required* here. It is chosen
-for two real reasons: it exercises MCP (a relevant skill), and it mirrors how the category
-exposes this (Vanta ships its own MCP server). Being able to say *why* MCP, including
-that it's not load-bearing, is the point.
-**Status:** confirm after M2.
+**Decision.** Implement the five read-only tools as pure Python functions (`tools.py`)
+and expose the same functions through a self-built FastMCP stdio server
+(`mcp_server.py`) for MCP clients.
+**Rejected.** (a) An MCP-only tool surface — pointless protocol overhead inside a
+single-process CLI. (b) In-process functions only — loses the external integration
+surface. **Honest note:** MCP is *not load-bearing* here. It is included for two real
+reasons: it exercises MCP (a relevant skill), and it mirrors how the category exposes
+this (Vanta ships its own MCP server). Being able to say *why* MCP, including that
+it's optional, is the point.
+**Status:** confirmed, with the boundary made explicit by implementation. The CLI and
+evaluation paths call the pure functions in-process through the Evidence Collector;
+the FastMCP server serves the identical functions over stdio and is tested but not on
+the assess path. `langchain-mcp-adapters` remains a provisioned dependency for
+external MCP-client integration; it is not used by the internal assess transport.
 
 ### D4 — Verifier self-correction loop as the trust mechanism
 **Context.** For a compliance tool, a confidently-wrong "satisfied" is the failure
@@ -142,7 +149,7 @@ independently concluded from the fixture content. That's a correction against to
 capability, not a re-litigation of the labeler's judgment — worth distinguishing from the
 "hand-verify" step this decision originally described.
 
-### D9 — Held open until the first real run: eval-metric selection + rubric thresholds
+### D9 — Evaluation metrics and rubric thresholds: resolved after the first real run
 **Context.** You don't know which metrics distinguish good from bad, or where verdict
 boundaries should sit, until you've seen real outputs.
 **Decision.** Treat the metric set and the rubric's satisfied/partial/gap thresholds as
@@ -162,22 +169,23 @@ tightening it based on a single run's number risks locking in noise the eval's o
 non-determinism could produce (`docs/TEST_PLAN.md`); revisit if a future run's margin
 above 0.70 stays this wide across repeated runs.
 
-### D10 — Packaging: single Docker image; MCP server as a stdio subprocess
+### D10 — Packaging: single Docker image, no separate MCP container
 **Context.** "Launchable from Docker" with the least operational surface.
-**Decision.** One image; the MCP server is spawned as a stdio subprocess by the app.
-A non-root container (which also happens to satisfy control CM-2/CM-6). KB and reports
-are volumes; API keys via `.env`.
+**Decision.** One image carries the whole workflow — CLI, scanner tools, and the
+FastMCP server (runnable in-container over stdio for MCP clients; the assess path
+calls the scanner functions in-process, per D3). A non-root container (which also
+happens to satisfy control CM-2/CM-6). KB and reports are volumes; API keys via `.env`.
 **Rejected.** A separate MCP container — an unnecessary process boundary for a stdio server.
 **Status:** confirmed (M2/M5/M5.5). MCP server implemented; CLI `assess` subcommand wired to
 `run_assessment` in M5. Docker packaging itself is implemented, not deferred — Dockerfile +
-docker-compose.yml, non-root user (fixed UID 10001), MCP stdio subprocess. M5.5 hardened it
+docker-compose.yml, non-root user (fixed UID 10001). M5.5 hardened it
 further: `chroma_db`/`artifacts` are named Docker volumes (not bind mounts), avoiding a
 host/container UID mismatch that broke local read/write sharing with a venv CLI; the image
 build decouples the ~5-minute `pip install -e .` layer from source/README changes (a stub
 package + README stand in at install time; the real files land after via `COPY . .`), cutting
 source-only rebuilds dramatically; and `make build` builds only the `app` service
 instead of redundantly exporting the same image three times across `app`/`test`/`test-all`.
-Remaining Docker-adjacent polish (run/tool-call logs, etc.) stays scoped to M8.
+Run/tool-call logging landed in M8 (`run_log.py`).
 
 ### D11 — Interface: CLI + rendered report, no custom web frontend
 **Context.** The output is a structured report, consumed programmatically.

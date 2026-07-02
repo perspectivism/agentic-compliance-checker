@@ -85,7 +85,7 @@ venv:
 	$(PYTHON) -m pip install -e ".[dev]"
 
 # venv only installs the [dev] extra (fast lane, no agent stack — matches
-# AGENTS.md's staged M1 -> M2+ install order). ingest-local / assess-local /
+# AGENTS.md's staged install order). ingest-local / assess-local /
 # eval-local all need the agent stack, hence this as a separate step.
 install-agent:
 	$(PYTHON) -m pip install -e ".[dev,agent]"

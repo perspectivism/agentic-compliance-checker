@@ -7,10 +7,11 @@ procedural or organizational controls (those return `not_assessable`).
 
 This rubric intentionally limits v1 to technical controls that can be reasonably assessed from source code, IaC, container definitions, and CI configuration.
 
-> **v1 — refine after the first real run.** The satisfied/partial/gap boundaries below
-> are a starting point. Once the tool runs against real repos and surfaces ambiguous
-> cases, tune the criteria and thresholds (see `docs/DECISIONS.md` D9). Change them
-> here, deliberately, rather than letting the agent invent inconsistent rules.
+> The satisfied/partial/gap boundaries below were confirmed by the first end-to-end
+> evaluation runs — no threshold changes were needed (see
+> [DECISIONS.md](DECISIONS.md#d9--evaluation-metrics-and-rubric-thresholds-resolved-after-the-first-real-run)
+> D9). If future runs surface ambiguous cases, change the criteria here, deliberately,
+> rather than letting the agent invent inconsistent rules.
 
 Verdicts:
 - `satisfied`

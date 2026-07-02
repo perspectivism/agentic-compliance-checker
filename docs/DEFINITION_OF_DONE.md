@@ -23,51 +23,54 @@ The project is done when all items below are true.
 - [x] M3 tests pass.
 - [x] M4 tests pass.
 - [x] M5 tests pass.
-- [ ] M6 tests pass.
-- [ ] M7 tests pass.
-- [ ] M8 tests pass.
-- [ ] Full `pytest` passes.
+- [x] M6 tests pass.
+- [x] M7 tests pass.
+- [x] M8 tests pass.
+- [x] Full `pytest` passes.
 
 ## Evaluation
 
-- [ ] Golden dataset stub exists.
-- [ ] Golden set generated with a different model, spot-checked, and frozen (`data/golden_set.yaml`).
-- [ ] Golden-set validation tests run in the fast lane (every check-in).
-- [ ] Evaluation runner works.
-- [ ] Classification report generated.
-- [ ] Macro-F1 threshold documented.
-- [ ] Failure cases are readable.
+- [x] Golden dataset stub exists.
+- [x] Golden set generated with a different model, spot-checked, and frozen (`data/golden_set.yaml`).
+- [x] Golden-set validation tests run in the fast lane (every check-in).
+- [x] Evaluation runner works.
+- [x] Classification report generated.
+- [x] Macro-F1 threshold documented.
+- [x] Failure cases are readable.
 
 ## Security
 
-- [ ] **Secure and fail-safe by default** is stated and enforced (see AGENTS.md / THREAT_MODEL.md).
-- [ ] No repo code execution.
-- [ ] Symlink escape test passes.
-- [ ] Prompt injection fixture test passes.
-- [ ] Secret redaction test passes.
-- [ ] Logs do not expose full secrets.
-- [ ] **Fail-closed:** a tool/scanner error yields `not_assessable`, never `satisfied` or a crash (tested).
-- [ ] **URL validation:** `file://`, `ext::`, `ssh://`, and internal/loopback URLs are rejected before clone (tested).
-- [ ] **Egress:** analysis tools make no network calls; only the clone + model/embeddings API reach the network.
-- [ ] **Dogfooding:** the project's own CI runs a dependency audit (pip-audit) and a secret scan (gitleaks).
+- [x] **Secure and fail-safe by default** is stated and enforced (see AGENTS.md / THREAT_MODEL.md).
+- [x] No repo code execution.
+- [x] Symlink escape test passes.
+- [x] Prompt injection fixture test passes.
+- [x] Secret redaction test passes.
+- [x] Logs do not expose full secrets.
+- [x] **Fail-closed:** a tool/scanner error yields `not_assessable`, never `satisfied` or a crash (tested).
+- [x] **URL validation:** `file://`, `ext::`, `ssh://`, and internal/loopback URLs are rejected before clone (tested).
+- [x] **Egress:** analysis tools make no network calls; only the clone + model/embeddings API reach the network.
+- [x] **Dogfooding:** the project's own CI runs a dependency audit (pip-audit) and a secret scan (gitleaks).
 
 ## Packaging / Docker
 
-- [ ] `make build` succeeds.
-- [ ] `make test` (fast lane) passes in the container.
-- [ ] `make assess REPO=<url>` runs end-to-end.
-- [ ] Image runs as non-root.
-- [ ] `.env.example` documents required keys; `.env` is gitignored.
-- [ ] KB and reports persist via volumes (not baked into the image).
+- [x] `make build` succeeds.
+- [x] `make test` (fast lane) passes in the container.
+- [x] `make assess REPO=<url>` runs end-to-end (verified against
+      `bridgecrewio/terragoat`: dynamic selection, 6 controls, 3 evidenced gaps,
+      2 partials, secrets masked, verifier loop engaged, run log written).
+- [x] Image runs as non-root.
+- [x] `.env.example` documents required keys; `.env` is gitignored.
+- [x] KB and reports persist via volumes (not baked into the image).
 
 ## Documentation and demo
 
-- [ ] Affected docs match implemented behavior and tested limitations.
-- [ ] Living-doc header notes removed from all docs.
-- [ ] README explains the architecture.
-- [ ] Architecture diagram included.
-- [ ] Demo command included.
-- [ ] Limitations stated.
-- [ ] `LICENSE` (Apache-2.0) and `NOTICE` present; copyright holder filled in.
-- [ ] Screenshots/traces included if available.
+- [x] Affected docs match implemented behavior and tested limitations.
+- [x] Living-doc header notes removed from all docs.
+- [x] README explains the architecture.
+- [x] Architecture diagram included.
+- [x] Demo command included.
+- [x] Limitations stated.
+- [x] `LICENSE` (Apache-2.0) and `NOTICE` present; copyright holder filled in.
+- [x] Run inspection surface documented (JSONL run log; a Studio screenshot was
+      deliberately not included).
 - [ ] 2–3 minute demo video recorded if desired.

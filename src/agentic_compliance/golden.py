@@ -1,4 +1,4 @@
-"""Golden evaluation set — schema validation and loading (M6/M7).
+"""Golden evaluation set — schema validation and loading.
 
 Golden cases are produced by scripts/generate_golden.py (a labeler model different
 from the agent's own CHAT_MODEL, per docs/DECISIONS.md D8), hand-reviewed, and

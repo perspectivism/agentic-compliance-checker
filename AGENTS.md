@@ -36,13 +36,13 @@ It is built around production-oriented agent engineering:
 - Chat model via LangChain `init_chat_model` (default `CHAT_MODEL=anthropic:claude-sonnet-4-6`); embeddings via local model by default (`EMBEDDINGS_MODEL=local`, no second API key) or `openai:text-embedding-3-small`
 - Pydantic typed response schemas
 - FastMCP / MCP Python SDK
-- `langchain-mcp-adapters`
+- `langchain-mcp-adapters` (provisioned for external MCP-client integration; the CLI assess path calls the scanner functions in-process — see `docs/DECISIONS.md` D3)
 - Chroma for the controls KB (vectors + retrieval text + `{control_id, name}` metadata; full rubric content stays in `data/controls.yaml`)
 - pytest
 - scikit-learn for verdict metrics
-- Optional: RAGAS for grounding metrics
+- Optional: RAGAS for grounding metrics (deferred; provisioned in the `[grounding]` extra, not installed by default — see `docs/DECISIONS.md` D7)
 - Optional: LangSmith or OpenTelemetry/Phoenix for tracing
-- Docker + Compose for packaging (single image; MCP server runs as a stdio subprocess inside it)
+- Docker + Compose for packaging (single image; the FastMCP server is runnable in-container over stdio for MCP clients)
 
 ## Run surface
 - CLI entrypoint: `src/agentic_compliance/cli.py` (subcommands `assess`, `ingest-controls`, `eval`) — also the Docker ENTRYPOINT and the `agentic-compliance` console script. Keep its imports lazy.

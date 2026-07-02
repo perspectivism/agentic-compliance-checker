@@ -2,8 +2,9 @@
 #
 # Single-image build for the agentic compliance checker.
 #
-# The MCP server is NOT a separate container: langchain-mcp-adapters spawns it as
-# a stdio subprocess inside this image, so one image runs the whole workflow.
+# The MCP server is NOT a separate container: the same image can run it over stdio
+# (python -m agentic_compliance.mcp_server) for MCP clients. The CLI assess path
+# calls the scanner functions in-process and does not need it (DECISIONS.md D3).
 
 FROM python:3.12-slim AS base
 # Python 3.12 is the project floor (requires-python >=3.12) and has full, mature wheel

@@ -604,7 +604,8 @@ class TestScanCISecurity:
         """secret_scan_missing must not carry IA-5 — that control's rubric gap is
         hardcoded secrets in the repo (scan_secrets' job), not absent CI tooling.
         Mistagging this let a CI-only fixture's IA-5 not_assessable golden label
-        silently earn 'gap' evidence it isn't entitled to (caught in M7 eval review).
+        silently earn 'gap' evidence it isn't entitled to (caught during golden-set
+        review against real scanner output).
         """
         findings = scan_ci_security(FIXTURES / "ci_no_security_repo")
         missing = [f for f in findings if f.finding_type == "secret_scan_missing"]

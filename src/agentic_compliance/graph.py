@@ -30,6 +30,7 @@ from .control_selection import explicit_selection, select_controls
 from .evidence_collector import collect_evidence
 from .kb import ControlEntry
 from .retriever import ControlsRetriever
+from .run_log import JSONLRunLogger, NoopRunLogger, RunLogger, instrument_node, safe_error_fields
 from .schemas import (
     CollectionResult,
     ControlVerdict,
@@ -203,15 +204,19 @@ def _verifier_human(draft: ControlVerdict, collection: CollectionResult) -> str:
 # ── Graph builder ──────────────────────────────────────────────────────────────
 
 
-def _build_graph(synthesizer: Any = None, verifier: Any = None):
+def _build_graph(synthesizer: Any = None, verifier: Any = None, logger: RunLogger | None = None):
     """Build and compile the compliance StateGraph.
 
     synthesizer and verifier are already-structured models (after with_structured_output).
     Pass them explicitly for testing; leave None for production (lazy init from CHAT_MODEL).
 
+    logger defaults to NoopRunLogger — existing callers (tests, langgraph dev) get no
+    log file unless they opt in. run_assessment() supplies a real JSONLRunLogger.
+
     The LLMs are only initialized on first node invocation, so importing this module
     or calling _build_graph() itself does not require CHAT_MODEL to be set.
     """
+    log = logger if logger is not None else NoopRunLogger()
 
     def _get_synthesizer():
         if synthesizer is not None:
@@ -234,6 +239,15 @@ def _build_graph(synthesizer: Any = None, verifier: Any = None):
         control = ControlEntry.model_validate(state["controls"][state["control_idx"]])
         repo_root = Path(state["repo_root"])
         result = collect_evidence(repo_root, control)
+        # Structural summary only — never the evidence/error content itself.
+        log.log(
+            "tool_call",
+            control_id=control.id,
+            tools=control.scanner_hints,
+            evidence_count=len(result.evidence),
+            error_count=len(result.errors),
+            limitation_count=len(result.limitations),
+        )
         return {
             "collection": result.model_dump(),
             # Reset per-control verifier state for each fresh evidence run.
@@ -282,6 +296,17 @@ def _build_graph(synthesizer: Any = None, verifier: Any = None):
         new_status = "passed" if decision.approved else "failed"
         updated_notes = state["verifier_notes"] + (
             [decision.notes] if not decision.approved else []
+        )
+        # notes_present, not the notes text itself — verifier rationale is freeform
+        # LLM output and the log's job is to show that the loop ran, not to persist
+        # a second copy of reasoning that belongs in the FinalReport.
+        log.log(
+            "verifier_attempt",
+            control_id=draft.control_id,
+            attempt=attempts,
+            draft_verdict=draft.verdict.value,
+            approved=decision.approved,
+            notes_present=bool(decision.notes),
         )
         return {
             "verifier_attempts": attempts,
@@ -341,6 +366,12 @@ def _build_graph(synthesizer: Any = None, verifier: Any = None):
                 }
             )
 
+        log.log(
+            "verdict_finalized",
+            control_id=draft.control_id,
+            verdict=draft.verdict.value,
+            verifier_status=draft.verifier_status,
+        )
         return {
             "verdicts": [draft.model_dump()],  # operator.add appends to the accumulated list
             "control_idx": state["control_idx"] + 1,
@@ -369,6 +400,7 @@ def _build_graph(synthesizer: Any = None, verifier: Any = None):
                 ),
             },
         )
+        log.log("run_end", **report.audit)
         return {"final_report": report.model_dump()}
 
     # ── Routing ────────────────────────────────────────────────────────────────
@@ -391,12 +423,14 @@ def _build_graph(synthesizer: Any = None, verifier: Any = None):
     # ── Assemble ───────────────────────────────────────────────────────────────
 
     builder = StateGraph(ComplianceState)
-    builder.add_node("supervisor", supervisor_node)
-    builder.add_node("collect", collect_node)
-    builder.add_node("synthesize", synthesize_node)
-    builder.add_node("verify", verify_node)
-    builder.add_node("finalize_control", finalize_control_node)
-    builder.add_node("final", final_node)
+    builder.add_node("supervisor", instrument_node("supervisor", supervisor_node, log))
+    builder.add_node("collect", instrument_node("collect", collect_node, log))
+    builder.add_node("synthesize", instrument_node("synthesize", synthesize_node, log))
+    builder.add_node("verify", instrument_node("verify", verify_node, log))
+    builder.add_node(
+        "finalize_control", instrument_node("finalize_control", finalize_control_node, log)
+    )
+    builder.add_node("final", instrument_node("final", final_node, log))
 
     builder.add_edge(START, "supervisor")
     builder.add_conditional_edges(
@@ -456,6 +490,7 @@ def run_assessment(
     verifier: Any = None,
     top_k_controls: int = 6,
     store_path: Path | None = None,
+    logger: RunLogger | None = None,
 ) -> FinalReport:
     """Assess repo_root against controls and return a FinalReport.
 
@@ -469,6 +504,9 @@ def run_assessment(
     synthesizer and verifier can be injected for testing (pre-structured models).
     top_k_controls is the maximum number of controls to select in dynamic mode.
     store_path defaults to ./chroma_db (the ingest-controls default output).
+    logger defaults to a real JSONLRunLogger writing artifacts/runs/<run_id>.jsonl;
+    pass NoopRunLogger() or InMemoryRunLogger() to opt out (tests do this to avoid
+    writing files for every assertion).
     """
     if controls is None:
         _store_path = store_path or Path("./chroma_db")
@@ -481,8 +519,15 @@ def run_assessment(
 
     model_id = os.environ.get("CHAT_MODEL", "unset")
     state = _initial_state(repo_root, controls, model_id=model_id, selection=selection)
-    compiled = _build_graph(synthesizer=synthesizer, verifier=verifier)
-    result = compiled.invoke(state, config={"recursion_limit": GRAPH_RECURSION_LIMIT})
+    log = logger if logger is not None else JSONLRunLogger(run_id=state["run_id"])
+    compiled = _build_graph(synthesizer=synthesizer, verifier=verifier, logger=log)
+
+    log.log("run_start", repo_root=str(repo_root), model_id=model_id, num_controls=len(controls))
+    try:
+        result = compiled.invoke(state, config={"recursion_limit": GRAPH_RECURSION_LIMIT})
+    except Exception as exc:
+        log.log("run_error", **safe_error_fields(exc))
+        raise
     return FinalReport.model_validate(result["final_report"])
 
 

@@ -14,8 +14,8 @@ jobs:
         # supported range, not just the minimum.
         python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -51,17 +51,27 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Dependency audit (dogfood SI-2/RA-5)
+        # BLOCKING: a new advisory fails the build until triaged. Accepted risks below
+        # are documented waivers, not suppressions of convenience — re-review each when
+        # its package publishes a fixed version (none published as of 2026-07-02):
+        #  - PYSEC-2026-311 (chromadb): pre-auth RCE in the Chroma *server* API endpoint.
+        #    This project uses Chroma embedded-only; no Chroma server ever runs and no
+        #    endpoint is exposed (docs/ARCHITECTURE.md "RAG store").
+        #  - CVE-2025-69872 (diskcache, transitive): pickle deserialization requiring an
+        #    attacker with write access to the local cache directory — host compromise,
+        #    outside this tool's threat boundary (docs/THREAT_MODEL.md scope).
         run: |
           python -m pip install --upgrade pip pip-audit
           python -m pip install -e ".[agent]"
-          # Report advisories; not blocking yet (triage, then drop `|| true` to enforce).
-          pip-audit || true
+          pip-audit \
+            --ignore-vuln PYSEC-2026-311 \
+            --ignore-vuln CVE-2025-69872
 
       - name: Secret scan (dogfood IA-5)
         # gitleaks via Docker needs no license (unlike the org-gated Action). The config

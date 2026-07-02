@@ -1,4 +1,4 @@
-"""M5.5 — Semantic control selection: feature detection, query building, retrieval, CLI."""
+"""Semantic control selection: feature detection, query building, retrieval, CLI."""
 
 from __future__ import annotations
 
