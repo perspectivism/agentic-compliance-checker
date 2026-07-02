@@ -254,6 +254,42 @@ class TestScanIACSecurity:
         findings = scan_iac_security(FIXTURES / "insecure_terraform_app")
         assert any(f.finding_type == "missing_s3_versioning" for f in findings)
 
+    def test_partial_network_fixture_has_both_sc7_positive_and_gap_evidence(self):
+        """partial_network_app: app tier (SG reference) is positive SC-7 evidence,
+        db tier (open CIDR ingress) is gap SC-7 evidence — both must be present so
+        the fixture can genuinely support a `partial` verdict, not just a `gap`."""
+        findings = scan_iac_security(FIXTURES / "partial_network_app")
+        sc7_findings = [f for f in findings if "SC-7" in f.control_hints]
+
+        sg_findings = [f for f in sc7_findings if f.finding_type == "sg_reference_ingress"]
+        assert len(sg_findings) == 1, (
+            f"expected exactly one sg_reference_ingress finding, got {len(sg_findings)}: "
+            f"{[f.excerpt for f in sg_findings]}"
+        )
+        assert sg_findings[0].excerpt == "security_groups = [aws_security_group.web.id]"
+        assert not sg_findings[0].excerpt.startswith("#"), (
+            "positive SC-7 finding must cite real Terraform, not a comment"
+        )
+
+        assert any(f.finding_type == "public_ingress" for f in sc7_findings), (
+            "missing gap SC-7 evidence (open CIDR ingress)"
+        )
+
+    def test_partial_network_fixture_has_both_ac3_positive_and_gap_evidence(self):
+        """partial_network_app: the same SG-reference is also positive AC-3 evidence
+        (docs/RUBRIC.md's AC-3 positive_evidence names "scoped security groups"
+        explicitly), and the open-CIDR db ingress is gap AC-3 evidence. Without this,
+        the Evidence Collector would only ever see the gap side for AC-3, making a
+        `partial` golden label for this control unachievable by the real pipeline."""
+        findings = scan_iac_security(FIXTURES / "partial_network_app")
+        ac3_findings = [f for f in findings if "AC-3" in f.control_hints]
+        assert any(f.finding_type == "sg_reference_ingress" for f in ac3_findings), (
+            "missing positive AC-3 evidence (security-group reference)"
+        )
+        assert any(f.finding_type == "public_ingress" for f in ac3_findings), (
+            "missing gap AC-3 evidence (open CIDR ingress)"
+        )
+
     def test_dockerfile_flags_unpinned_base_image(self, tmp_path):
         """scan_iac_security flags FROM image:latest in a Dockerfile."""
         (tmp_path / "Dockerfile").write_text("FROM python:latest\nRUN pip install flask\n")
@@ -569,6 +605,22 @@ class TestScanCISecurity:
         # ci_scanning_repo has no permissions: declaration
         findings = scan_ci_security(FIXTURES / "ci_scanning_repo")
         assert any(f.finding_type == "missing_permissions_declaration" for f in findings)
+
+    def test_ci_partial_scanning_fixture_has_mixed_si2_ra5_evidence(self):
+        """ci_partial_scanning_repo: pip-audit present + no container/filesystem
+        scanner produces BOTH a present and a missing finding, both tagged SI-2/RA-5
+        — genuine mixed evidence, so `partial` is achievable by the real pipeline
+        (not just a plausible-sounding label with nothing backing one side)."""
+        findings = scan_ci_security(FIXTURES / "ci_partial_scanning_repo")
+        si2_findings = [f for f in findings if "SI-2" in f.control_hints]
+        assert any(f.finding_type == "dependency_audit_present" for f in si2_findings), (
+            "missing positive SI-2/RA-5 evidence (dependency audit)"
+        )
+        assert any(f.finding_type == "container_scan_missing" for f in si2_findings), (
+            "missing gap SI-2/RA-5 evidence (no container/filesystem scanner) — check "
+            "the fixture's own comments don't name an absent tool literally, which "
+            "would make the unanchored CI-tool regex match it as present"
+        )
 
     def test_finds_sast_when_present(self, tmp_path):
         """scan_ci_security reports sast_present when CodeQL is in the workflow."""

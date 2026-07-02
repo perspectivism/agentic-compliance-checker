@@ -44,6 +44,7 @@ _FEATURE_PHRASES: dict[str, str] = {
     "terraform_iam": "IAM policy least privilege scoped actions resources permissions role",
     "terraform_cloudtrail": "CloudTrail audit logging monitoring event record",
     "terraform_monitoring": "CloudWatch alarm monitoring alerting GuardDuty threat detection observability",
+    "terraform_network": "boundary protection network segmentation VPC subnet private subnet firewall perimeter security group tiered architecture DMZ web tier database tier isolation internal-only access",
     "dockerfile": "Docker container image non-root user hardening secrets environment",
     "github_actions": "CI pipeline security dependency scanning SAST secret scanning permissions",
     "docker_compose": "Docker Compose secrets environment variables service exposure",
@@ -69,6 +70,10 @@ _TF_RESOURCE_FEATURE: dict[str, str] = {
     "aws_cloudtrail": "terraform_cloudtrail",
     "aws_cloudwatch_metric_alarm": "terraform_monitoring",
     "aws_guardduty_detector": "terraform_monitoring",
+    "aws_security_group": "terraform_network",
+    "aws_subnet": "terraform_network",
+    "aws_db_subnet_group": "terraform_network",
+    "aws_vpc": "terraform_network",
 }
 
 _TF_RESOURCE_RE = re.compile(r'resource\s+"([^"]+)"')

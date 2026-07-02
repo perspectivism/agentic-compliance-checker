@@ -23,10 +23,39 @@ regenerating labels each time.
 Each row contains:
 - fixture repo,
 - control ID,
+- question (what the label answers),
 - expected verdict,
 - expected evidence hints,
-- rationale,
 - whether human-verified.
+
+As of M6, `data/golden_set.yaml` is frozen: 54 cases, all `human_verified: true`,
+distribution `satisfied: 5, partial: 3, gap: 7, not_assessable: 39` — every class
+clears the ≥3 minimum. A few candidates were corrected post-generation for reasons
+beyond subjective spot-check: some controls (e.g. `CM-3`, `SI-4`, `SC-12`) have no
+scanner support anywhere in `tools.py`, so no verdict but `not_assessable` is
+achievable by the real pipeline regardless of what the labeler concluded from reading
+the fixture directly.
+
+### Golden generation workflow
+
+```bash
+make ingest-local
+.venv/bin/python scripts/generate_golden.py --dry-run   # validate wiring, no LLM calls
+make golden-local                                       # writes artifacts/golden_candidates.yaml
+make golden-local FIXTURE=<fixture_name>                # add one fixture without re-billing the rest
+.venv/bin/python -m pytest tests/test_golden.py
+cp artifacts/golden_candidates.yaml data/golden_set.yaml # after reviewing and setting human_verified: true
+```
+
+Requires `GOLDEN_LABEL_MODEL` set in `.env` to a model different from `CHAT_MODEL`
+(`docs/DECISIONS.md` D8) — the generator refuses to run otherwise.
+
+Lifecycle:
+- `artifacts/golden_candidates.yaml` — generated, unreviewed workspace (gitignored,
+  never committed).
+- `data/golden_set.yaml` — reviewed, frozen, committed ground truth.
+- `human_verified: true` is the only thing M7 counts as ground truth — an unverified
+  candidate is a provisional label, not an assertion of correctness.
 
 ## Verdict metrics
 

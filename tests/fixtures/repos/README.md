@@ -6,10 +6,12 @@ targets specific controls/behaviors. They are **not** real projects.
 | Fixture | Exercises | Expected signal |
 |---|---|---|
 | `ci_no_security_repo` | SI-2/RA-5 CI scanning (gap) | CI present but no security scanner → `gap` |
+| `ci_partial_scanning_repo` | SI-2/RA-5 CI scanning (partial) | dependency audit present, no container/filesystem scanner → `partial` |
 | `ci_scanning_repo` | SI-2/RA-5 CI scanning | Trivy/pip-audit present → `satisfied` |
 | `hardcoded_secret_app` | IA-5 secrets handling | secret detected → `gap`; value MASKED in logs/report |
-| `insecure_terraform_app` | AC-3, AC-6, SC-28, SC-8 | negative evidence → `gap` |
+| `insecure_terraform_app` | AC-3, AC-6, SC-7, SC-28, SC-8 | negative evidence → `gap` |
 | `no_iac_repo` | graceful degradation | infra controls → `not_assessable` (not `gap`) |
+| `partial_network_app` | SC-7 boundary protection | app tier uses an SG reference, db tier allows internet-wide CIDR ingress → `partial` |
 | `prompt_injection_repo` | indirect prompt injection | payload treated as data; verdicts unchanged |
 | `secure_terraform_app` | SC-8, SC-28, AC-3, AC-6 | positive evidence → `satisfied` |
 

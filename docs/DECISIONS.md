@@ -63,6 +63,11 @@ selection, `retriever.get_by_ids()` materializes the chosen `ControlEntry` objec
 the in-memory index — no second YAML read. At scale (hundreds of controls), the rubric
 content would move into Chroma document `page_content` so retrieval returns full rubric
 text directly; at 14 controls the YAML+Chroma split is the correct authoring surface.
+A `terraform_network` sub-feature (`aws_security_group`/`aws_subnet`/`aws_db_subnet_group`/
+`aws_vpc` → SC-7 vocabulary) was added in service of M6: SC-7 previously had no
+resource-type boost and never appeared in any fixture's top-k, which meant no fixture
+could produce a `partial` verdict (`docs/RUBRIC.md`'s only explicit "partial if only
+some tiers protected" control was structurally unreachable).
 
 ### D3 — Tools exposed over a self-built MCP server (not in-process functions)
 **Context.** The agent needs read-only repo-inspection tools; control lookup is handled by RAG over the controls KB, not an MCP tool.
@@ -119,7 +124,16 @@ scikit-learn confusion matrix / `classification_report` for verdict accuracy.
 agent uses, hand-verify ~20–30%, then freeze. Report numbers as indicative, not certified.
 **Rejected.** (a) Hand-labeling everything — too slow. (b) Same model labels and runs —
 grades the model against its own opinion.
-**Status:** confirm after M6.
+**Status:** confirmed (M6). `scripts/generate_golden.py` generated 54 candidates into
+`artifacts/golden_candidates.yaml` (a gitignored review workspace) via `GOLDEN_LABEL_MODEL`;
+after review, all 54 were frozen as `data/golden_set.yaml`. Review here went beyond pure
+subjective spot-check: several candidates were corrected for a mechanical reason, not a
+judgment call — some controls (`CM-3`, `SI-4`, `SC-12`, and `SI-2/RA-5` on fixtures with no
+CI workflow at all) have zero scanner support in `tools.py`, so no verdict but
+`not_assessable` is achievable by the real pipeline regardless of what the labeler
+independently concluded from the fixture content. That's a correction against tool
+capability, not a re-litigation of the labeler's judgment — worth distinguishing from the
+"hand-verify" step this decision originally described.
 
 ### D9 — Held open until the first real run: eval-metric selection + rubric thresholds
 **Context.** You don't know which metrics distinguish good from bad, or where verdict

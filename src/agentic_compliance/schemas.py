@@ -167,6 +167,25 @@ class SelectionResult(BaseModel):
     selected_controls: list[SelectedControl]
 
 
+class GoldenCase(BaseModel):
+    """One labeled example in the golden evaluation set (M6/M7).
+
+    Candidates are produced by scripts/generate_golden.py using a labeler model
+    different from the agent's own CHAT_MODEL (docs/DECISIONS.md D8), then
+    hand-reviewed. Only human_verified=True cases count as ground truth for the
+    M7 evaluation harness — unverified candidates are provisional labels, not
+    assertions about correct behavior.
+    """
+
+    id: str
+    repo_fixture: str  # directory name under tests/fixtures/repos/
+    control_id: str
+    question: str
+    expected_verdict: VerdictClass
+    expected_evidence_hints: list[str] = []
+    human_verified: bool = False
+
+
 class FinalReport(BaseModel):
     """Complete assessment report for one repository run."""
 

@@ -132,10 +132,11 @@ appear on the host until exported. `make export-artifacts` copies them to
 `artifacts/docker/` by default, keeping Docker-origin reports separate from
 local ones.
 
+The table uses shorthand, not literal commands. See the Local/Docker examples above for exact invocations; for example, `make assess ...` means `make assess REPO=<url>` plus optional `CONTROLS=`, `TOP_K=`, `OUT=`, or `FORMAT=`.
+
 | Command | Report path |
 |---|---|
 | `make assess-local` | `artifacts/local_report.json` |
-| direct local CLI (`assess --repo-url/--repo-path ...`) | `artifacts/report.json` |
 | `make assess ...` (Docker) | `/app/artifacts/report.json`, inside the volume |
 | `make export-artifacts` | `artifacts/docker/` |
 
@@ -162,6 +163,12 @@ State is in-memory and resets on restart — that's expected for dev.
 - `langgraph build` / LangGraph **Platform** — builds an API *server* image (needs
   Postgres/Redis) to serve the graph as a hosted agent. Intentionally **not used** here:
   the chosen interface is a CLI + report (see `docs/DECISIONS.md` D11), not a server.
+
+## Golden set generation
+
+Golden labels are generated with a model different from the agent's own (`make golden-local`
+/ `make golden`), reviewed by hand, then frozen as `data/golden_set.yaml` for the M7
+evaluation harness to consume — see `docs/EVAL_PLAN.md` for the full workflow.
 
 ## Why this isn't just RAG
 A RAG app retrieves documents and writes an answer. Here, semantic retrieval has one

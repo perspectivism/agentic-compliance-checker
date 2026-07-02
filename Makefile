@@ -1,4 +1,4 @@
-.PHONY: help venv install-agent format test-local test-all-local lint-local ingest-local assess-local eval-local build test test-all ingest assess eval shell lint export-artifacts clean
+.PHONY: help venv install-agent format test-local test-all-local lint-local ingest-local assess-local golden-local eval-local build test test-all ingest assess golden eval shell lint export-artifacts clean
 
 IMAGE      := agentic-compliance-checker:latest
 PYTHON     ?= .venv/bin/python
@@ -21,6 +21,16 @@ CONTROLS_FLAG := $(if $(CONTROLS),--controls $(CONTROLS))
 TOP_K_FLAG    := $(if $(TOP_K),--top-k-controls $(TOP_K))
 FORMAT_FLAG   := $(if $(FORMAT),--format $(FORMAT))
 
+# golden / golden-local: generate candidate golden-set cases (scripts/generate_golden.py).
+# GOLDEN_OUT is a separate var from OUT (assess's own output var) since they write
+# different kinds of files and shouldn't share a default. FIXTURE restricts
+# generation to one fixture directory name — for adding a new fixture's cases
+# without re-labeling (and re-billing) the whole set.
+GOLDEN_OUT ?= artifacts/golden_candidates.yaml
+FIXTURE    ?=
+
+GOLDEN_FLAGS := $(if $(FIXTURE),--fixture $(FIXTURE))
+
 help:
 	@echo "Agentic compliance checker — make targets:"
 	@echo "  Local (venv):"
@@ -36,6 +46,9 @@ help:
 	@echo "    make assess-local        Assess a repo locally, no Docker (default: bundled fixture via"
 	@echo "                             REPO_PATH=; REPO=<url> to assess a public repo instead; plus"
 	@echo "                             optional CONTROLS/TOP_K/OUT/FORMAT)"
+	@echo "    make golden-local        Generate candidate golden-set cases in the venv (writes to"
+	@echo "                             GOLDEN_OUT=artifacts/golden_candidates.yaml; FIXTURE=<name> to"
+	@echo "                             add one fixture only — needs GOLDEN_LABEL_MODEL in .env)"
 	@echo "    make eval-local          Run the evaluation harness in the venv        [M7+]"
 	@echo "  Docker:"
 	@echo "    make build               Build the image"
@@ -44,6 +57,8 @@ help:
 	@echo "    make ingest              Build the controls knowledge base"
 	@echo "    make assess REPO=<url>   Assess a public GitHub repo (optional CONTROLS/TOP_K/OUT/FORMAT,"
 	@echo "                             e.g. CONTROLS=AC-6,SC-8 for explicit control selection)"
+	@echo "    make golden              Generate candidate golden-set cases (writes inside the"
+	@echo "                             artifacts volume; use export-artifacts to copy it out)"
 	@echo "    make eval                Run the evaluation harness          [M7+]"
 	@echo "    make shell               Open a bash shell in the container"
 	@echo "    make lint                Lint + format-check with ruff"
@@ -104,6 +119,14 @@ assess-local:
 		$(CONTROLS_FLAG) $(TOP_K_FLAG) $(FORMAT_FLAG) \
 		--out $(if $(OUT),$(OUT),artifacts/local_report.json)
 
+# Writes to artifacts/golden_candidates.yaml by default — a review workspace, not
+# the frozen data/golden_set.yaml. Needs GOLDEN_LABEL_MODEL set in .env to a model
+# different from CHAT_MODEL (see docs/DECISIONS.md D8); the script fails clearly
+# if it's unset. See docs/EVAL_PLAN.md for the full generate -> review -> freeze
+# workflow.
+golden-local:
+	$(PYTHON) scripts/generate_golden.py --out $(GOLDEN_OUT) $(GOLDEN_FLAGS)
+
 eval-local:
 	$(PYTHON) scripts/run_eval.py
 
@@ -130,6 +153,14 @@ assess: build
 	@test -n "$(REPO)" || { echo "Usage: make assess REPO=https://github.com/OWNER/REPO [CONTROLS=AC-6,SC-8]"; exit 1; }
 	docker compose run --rm app assess --repo-url $(REPO) \
 		$(CONTROLS_FLAG) $(TOP_K_FLAG) $(FORMAT_FLAG) $(if $(OUT),--out $(OUT))
+
+# Writes inside the artifacts named volume (like assess/eval), not directly to the
+# host — use `make export-artifacts` afterward to copy it out. Entrypoint override
+# is needed since the image's default ENTRYPOINT expects a CLI subcommand
+# (assess/ingest-controls/eval), not an arbitrary script path.
+golden: build
+	docker compose run --rm --entrypoint python app scripts/generate_golden.py \
+		--out $(GOLDEN_OUT) $(GOLDEN_FLAGS)
 
 eval: build
 	docker compose run --rm app eval

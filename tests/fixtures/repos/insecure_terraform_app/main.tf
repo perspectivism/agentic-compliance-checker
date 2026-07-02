@@ -1,6 +1,7 @@
 # Fixture: insecure_terraform_app
 # Intended GAP evidence for AC-3 (public admin access), AC-6 (wildcard IAM),
-# SC-28 (no encryption at rest), SC-8 (plain HTTP).
+# SC-7 (permissive ingress, no segmentation), SC-28 (no encryption at rest),
+# SC-8 (plain HTTP).
 
 resource "aws_security_group" "open_ssh" {
   name = "open-ssh"

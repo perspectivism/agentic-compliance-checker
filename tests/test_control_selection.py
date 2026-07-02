@@ -138,6 +138,29 @@ class TestDetectTerraformResources:
         features = detect_features(tmp_path)
         assert "terraform_cloudtrail" in features
 
+    def test_security_group_adds_terraform_network_feature(self, tmp_path):
+        """aws_security_group resource in .tf → terraform_network feature detected."""
+        (tmp_path / "main.tf").write_text('resource "aws_security_group" "web" {}\n')
+        features = detect_features(tmp_path)
+        assert "terraform_network" in features
+
+    def test_subnet_adds_terraform_network_feature(self, tmp_path):
+        """aws_subnet resource in .tf → terraform_network feature detected."""
+        (tmp_path / "main.tf").write_text('resource "aws_subnet" "app" {}\n')
+        features = detect_features(tmp_path)
+        assert "terraform_network" in features
+
+    def test_partial_network_fixture_detects_network_feature(self):
+        """partial_network_app's subnets/security groups → terraform_network feature."""
+        features = detect_features(FIXTURES / "partial_network_app")
+        assert "terraform_network" in features
+
+    def test_partial_network_fixture_query_contains_boundary_terms(self):
+        """Query built from partial_network_app features includes SC-7 vocabulary."""
+        features = detect_features(FIXTURES / "partial_network_app")
+        query = build_selection_query(features)
+        assert any(term in query for term in ("boundary", "segmentation", "security group"))
+
     def test_no_tf_resources_adds_no_sub_features(self, tmp_path):
         """Empty .tf file → only 'terraform' feature, no sub-features."""
         (tmp_path / "main.tf").write_text("# empty\n")
@@ -319,6 +342,21 @@ class TestSelectControlsSemanticAccuracy:
         result = select_controls(FIXTURES / "secure_terraform_app", retriever, top_k=6)
         ids = [c.control_id for c in result.selected_controls]
         assert "AC-6" in ids, f"AC-6 not in top-6 for secure_terraform_app; got: {ids}"
+
+    @pytest.mark.agent
+    def test_partial_network_app_selects_sc7(self):
+        """Dynamic selection for partial_network_app's real top-k includes SC-7.
+
+        Before the terraform_network sub-feature (aws_security_group/aws_subnet/
+        aws_db_subnet_group/aws_vpc), SC-7 never appeared in any fixture's top-k —
+        no resource-type boost existed for it, unlike SC-8/SC-28/AC-6/AU-2/AU-12.
+        This is the regression guard for that gap: partial_network_app is the one
+        fixture built specifically to need SC-7 selected.
+        """
+        retriever = ControlsRetriever.from_yaml(_CONTROLS_PATH)
+        result = select_controls(FIXTURES / "partial_network_app", retriever, top_k=6)
+        ids = [c.control_id for c in result.selected_controls]
+        assert "SC-7" in ids, f"SC-7 not in top-6 for partial_network_app; got: {ids}"
 
 
 # ── Explicit selection ─────────────────────────────────────────────────────────

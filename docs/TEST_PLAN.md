@@ -79,7 +79,7 @@ tests/
   test_evidence_node.py
   test_graph.py
   test_control_selection.py
-  test_golden_set.py
+  test_golden.py
   test_eval.py
   test_observability.py
   fixtures/

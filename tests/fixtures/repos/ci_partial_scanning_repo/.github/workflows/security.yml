@@ -1,0 +1,20 @@
+# Fixture: ci_partial_scanning_repo
+# Intended PARTIAL evidence for SI-2/RA-5 (vulnerability/dependency scanning).
+# Dependency auditing is configured below, but no other vulnerability-scanning
+# category runs in this workflow — one part of the control is satisfied, the
+# other part is missing. (Deliberately not naming other scanning tools here —
+# scan_ci_security's pattern match isn't comment-aware, so naming an absent
+# tool in a comment would make it register as present.)
+
+name: security
+
+on: [push, pull_request]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependency audit
+        run: pip-audit

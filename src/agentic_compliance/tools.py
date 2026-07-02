@@ -243,6 +243,33 @@ def _scan_terraform(repo_root: Path, files: list[RepoFile]) -> list[ToolFinding]
                     )
                 )
 
+        # SC-7/AC-3: security-group-to-security-group reference — positive evidence of
+        # internal-only access control (boundary protection), as opposed to an open
+        # CIDR range. Matches docs/RUBRIC.md's SC-7 evidence_hints directly: "Security
+        # group references instead of IP ranges indicate internal-only access." Also
+        # AC-3 evidence — its own positive_evidence text explicitly names "scoped
+        # security groups" as a valid signal for access enforcement, not just SC-7.
+        for i, line in enumerate(lines, start=1):
+            if re.search(r"^\s*security_groups\s*=\s*\[", line):
+                findings.append(
+                    ToolFinding(
+                        path=rel,
+                        start_line=i,
+                        end_line=i,
+                        finding_type="sg_reference_ingress",
+                        check_family="terraform",
+                        severity="info",
+                        message=(
+                            "Ingress rule references a security group rather than a CIDR "
+                            "range (internal-only access)"
+                        ),
+                        control_hints=["SC-7", "AC-3"],
+                        excerpt=line.strip(),
+                        redacted=False,
+                        limitations=["Does not confirm every tier uses this pattern"],
+                    )
+                )
+
         # SC-8: Load balancer listener protocol — block-aware.
         # An HTTP listener whose default_action is an HTTPS redirect is positive evidence,
         # not a gap. We must inspect the full block to distinguish the two cases.
